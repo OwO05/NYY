@@ -13,6 +13,8 @@ import { Sun, Newspaper, NotePencil, Notebook, Book, ForkKnife } from '@phosphor
 import { loadPushConfig, savePushConfig, registerScheduleOnWorker, startHeartbeat, stopHeartbeat, isPushConfigAvailable, ensureSubscribed, sendTestPush, getPushDiagnostics, resetSubscription, type PushDiagnostics } from '../utils/proactivePushConfig';
 import { ProactiveChat } from '../utils/proactiveChat';
 import { InstantPushSettingsModal } from '../components/settings/InstantPushSettingsModal';
+import { PushVapidSettingsModal } from '../components/settings/PushVapidSettingsModal';
+import { isPushVapidReady } from '../utils/pushVapid';
 
 const DiagRow: React.FC<{ label: string; value: string; bad?: boolean }> = ({ label, value, bad }) => (
     <div className="flex items-start justify-between gap-3">
@@ -121,6 +123,8 @@ const Settings: React.FC = () => {
   const [ppTestBusy, setPpTestBusy] = useState(false);
   const [ppResetBusy, setPpResetBusy] = useState(false);
   const [showInstantModal, setShowInstantModal] = useState(false);
+  const [showVapidModal, setShowVapidModal] = useState(false);
+  const [vapidReadyTick, setVapidReadyTick] = useState(0); // 关闭 VAPID 弹窗后刷新顶层徽标
 
   // 模型选择 Modal 的过滤 + 公共前缀（memo 掉，避免每次 Settings 重渲染都重算）
   const modelPickerView = useMemo(() => {
@@ -1221,6 +1225,37 @@ const Settings: React.FC = () => {
             </div>
         </section>
 
+        {/* ───────── 推送凭据 (VAPID) ───────── */}
+        {/* VAPID 公私钥, 与 Proactive / Instant Push 共用一份 — 独立成块, 避免再被当成 */}
+        {/* Instant Push 的子配置, 也避免两边 key 不一致互相抢同一个 pushManager 订阅. */}
+        {/* vapidReadyTick: VAPID 弹窗关闭后 +1, 让本节点 re-render 重读 isPushVapidReady(). */}
+        <section data-vapid-tick={vapidReadyTick} className="bg-white/80 rounded-3xl p-5 shadow-sm border border-white/50">
+            <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                    <div className="p-2 bg-violet-100/60 rounded-xl text-violet-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z" />
+                        </svg>
+                    </div>
+                    <h2 className="text-sm font-semibold text-slate-600 tracking-wider">推送凭据 (VAPID)</h2>
+                </div>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${isPushVapidReady() ? 'bg-violet-100 text-violet-600' : 'bg-rose-100 text-rose-600'}`}>
+                    {isPushVapidReady() ? '已配置' : '未配置'}
+                </span>
+            </div>
+            <p className="text-xs text-slate-500 mb-3 leading-relaxed">
+                Proactive Push 和 Instant Push <b>共用同一份 VAPID 密钥对</b>。两边 key 不一致时会反复 unsubscribe 抢同一个 pushManager 订阅 ——
+                "推送成功但收不到"的常见原因。
+            </p>
+            <button
+                type="button"
+                onClick={() => setShowVapidModal(true)}
+                className={`w-full py-2.5 rounded-xl text-xs font-bold ${isPushVapidReady() ? 'bg-white text-violet-700 border border-violet-200 hover:bg-violet-50' : 'bg-violet-500 text-white hover:bg-violet-600 shadow-md shadow-violet-200'}`}
+            >
+                {isPushVapidReady() ? '查看 / 重新生成' : '生成 VAPID 密钥对 →'}
+            </button>
+        </section>
+
         {/* ───────── 主动消息 Push 加速器（开关） ───────── */}
         {ppAvailable && (
         <section className="bg-white/80 rounded-3xl p-5 shadow-sm border border-white/50">
@@ -2045,7 +2080,15 @@ const Settings: React.FC = () => {
           </div>
       </Modal>
 
-      <InstantPushSettingsModal open={showInstantModal} onClose={() => setShowInstantModal(false)} />
+      <InstantPushSettingsModal
+        open={showInstantModal}
+        onClose={() => setShowInstantModal(false)}
+        onOpenVapid={() => { setShowInstantModal(false); setShowVapidModal(true); }}
+      />
+      <PushVapidSettingsModal
+        open={showVapidModal}
+        onClose={() => { setShowVapidModal(false); setVapidReadyTick((n) => n + 1); }}
+      />
 
     </div>
   );

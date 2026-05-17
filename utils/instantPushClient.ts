@@ -1,4 +1,5 @@
 import { InstantPushConfig, APIConfig } from '../types';
+import { loadPushVapid, isPushVapidReady } from './pushVapid';
 
 export const INSTANT_PUSH_CONFIG_KEY = 'instant_push_config_v1';
 
@@ -35,13 +36,19 @@ export interface InstantPushPayload {
 const DEFAULT_CONFIG: InstantPushConfig = {
   enabled: false,
   workerUrl: '',
-  vapidPublicKey: '',
 };
+
+// 旧版本 (v1 之前) 把 vapidPublicKey 平铺在 InstantPushConfig 里。读取时
+// 自动剥离掉，避免类型外泄；真正的 VAPID 现在统一从 pushVapid 读。
+function stripLegacyVapid(parsed: Record<string, unknown>): InstantPushConfig {
+  const { vapidPublicKey: _drop, ...rest } = parsed as Record<string, unknown> & { vapidPublicKey?: unknown };
+  return { ...DEFAULT_CONFIG, ...(rest as Partial<InstantPushConfig>) };
+}
 
 export function loadInstantConfig(): InstantPushConfig {
   try {
     const raw = localStorage.getItem(INSTANT_PUSH_CONFIG_KEY);
-    if (raw) return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+    if (raw) return stripLegacyVapid(JSON.parse(raw));
   } catch { /* ignore */ }
   return { ...DEFAULT_CONFIG };
 }
@@ -61,7 +68,7 @@ export function isInstantConfigReady(cfg?: InstantPushConfig): boolean {
   return (
     c.enabled &&
     c.workerUrl.startsWith('https://') &&
-    c.vapidPublicKey.length > 60
+    isPushVapidReady()
   );
 }
 
@@ -110,8 +117,13 @@ function explainSubscribeError(e: unknown): string {
 }
 
 export async function getOrCreateInstantSubscription(
-  vapidPublicKey: string,
+  vapidPublicKey?: string,
 ): Promise<{ sub: PushSubscriptionInfo | null; reason?: string }> {
+  // 不传则从 pushVapid 取 — Proactive / Instant 共用一份, 不再互踢订阅.
+  const pub = (vapidPublicKey || loadPushVapid().vapidPublicKey || '').trim();
+  if (pub.length < 60) {
+    return { sub: null, reason: 'VAPID 公钥未配置, 请到 Settings → Instant Push 生成并保存' };
+  }
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     return { sub: null, reason: '当前浏览器不支持 Service Worker 或 Push API' };
   }
@@ -128,7 +140,7 @@ export async function getOrCreateInstantSubscription(
     // Re-subscribe if VAPID key changed
     try {
       const existingKey = bytesToB64u(sub.options.applicationServerKey);
-      if (existingKey && existingKey !== vapidPublicKey) {
+      if (existingKey && existingKey !== pub) {
         await sub.unsubscribe();
         sub = null;
       }
@@ -145,7 +157,7 @@ export async function getOrCreateInstantSubscription(
     try {
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: b64uToBytes(vapidPublicKey),
+        applicationServerKey: b64uToBytes(pub),
       });
     } catch (e) {
       console.warn('[InstantPush] pushManager.subscribe failed', e);
@@ -252,7 +264,7 @@ export async function sendInstantPushAndAwaitReply(
     return { ok: false, outcome: 'config-missing', error: '请先在 Settings → Instant Push 里配置并保存' };
   }
 
-  const { sub, reason } = await getOrCreateInstantSubscription(cfg.vapidPublicKey);
+  const { sub, reason } = await getOrCreateInstantSubscription();
   if (!sub) {
     return { ok: false, outcome: 'subscription-failed', error: reason || '无法获取推送订阅' };
   }
@@ -307,7 +319,7 @@ export async function sendTestInstantPush(
     return { ok: false, error: '请先配置并保存 Instant Push 设置' };
   }
 
-  const { sub, reason } = await getOrCreateInstantSubscription(cfg.vapidPublicKey);
+  const { sub, reason } = await getOrCreateInstantSubscription();
   if (!sub) {
     return { ok: false, error: reason ?? '无法获取推送订阅' };
   }

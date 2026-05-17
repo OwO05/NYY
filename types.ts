@@ -157,7 +157,8 @@ export interface APIConfig {
 export interface InstantPushConfig {
   enabled: boolean;
   workerUrl: string;        // https://your-instant.workers.dev
-  vapidPublicKey: string;   // base64url
+  // VAPID 公私钥已迁移到 utils/pushVapid.ts (push_vapid_v1)，与 Proactive Push
+  // 共享同一份，避免两边互相 unsubscribe 抢同一个 pushManager 订阅。
   clientToken?: string;     // 对应 Worker 的 AMSG_CLIENT_TOKEN
   updatedAt?: number;
 }
