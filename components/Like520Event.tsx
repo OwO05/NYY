@@ -2416,7 +2416,8 @@ function useLike520BGM(active: boolean, currentGroup: BGMGroupKey | null) {
                 audio.loop = true;
                 audio.volume = 0;
                 audio.preload = 'auto';
-                audio.crossOrigin = 'anonymous';
+                // 注：不设 crossOrigin —— HTMLAudioElement 普通播放不需要 CORS，
+                // 设了反而要求 CDN 必须返回 CORS 头，否则整段播放失败
                 audio.src = url;
                 audio.load();
                 audiosRef.current[key] = audio;
@@ -2446,16 +2447,25 @@ function useLike520BGM(active: boolean, currentGroup: BGMGroupKey | null) {
     useEffect(() => {
         if (!active) return;
         const targetVol = mutedRef.current ? 0 : BGM_TARGET_VOLUME;
+
+        let needsGestureRetry = false;
+        const tryPlay = (audio: HTMLAudioElement, key: BGMGroupKey) => {
+            audio.play().then(() => {
+                fade(audio, targetVol);
+            }).catch(err => {
+                console.warn(`[520][BGM] play ${key} failed:`, err?.name || err);
+                if (err?.name === 'NotAllowedError') {
+                    needsGestureRetry = true;
+                }
+            });
+        };
+
         (Object.keys(audiosRef.current) as BGMGroupKey[]).forEach(key => {
             const audio = audiosRef.current[key];
             if (!audio) return;
             if (key === currentGroup) {
                 if (audio.paused) {
-                    audio.play().then(() => {
-                        fade(audio, targetVol);
-                    }).catch(err => {
-                        console.warn(`[520][BGM] play ${key} failed (autoplay?):`, err);
-                    });
+                    tryPlay(audio, key);
                 } else {
                     fade(audio, targetVol);
                 }
@@ -2463,6 +2473,22 @@ function useLike520BGM(active: boolean, currentGroup: BGMGroupKey | null) {
                 if (!audio.paused) fade(audio, 0);
             }
         });
+
+        // 兜底：如果首次 play 被 autoplay policy 拒了，监听下一次用户交互再试
+        if (needsGestureRetry && currentGroup) {
+            const retry = () => {
+                const a = audiosRef.current[currentGroup];
+                if (a && a.paused) tryPlay(a, currentGroup);
+                document.removeEventListener('pointerdown', retry);
+                document.removeEventListener('keydown', retry);
+            };
+            document.addEventListener('pointerdown', retry, { once: true, passive: true });
+            document.addEventListener('keydown', retry, { once: true });
+            return () => {
+                document.removeEventListener('pointerdown', retry);
+                document.removeEventListener('keydown', retry);
+            };
+        }
     }, [currentGroup, active, fade]);
 
     // muted 切换：实时调当前组音量
