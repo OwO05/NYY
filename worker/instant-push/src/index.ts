@@ -2,7 +2,7 @@
  * SullyOS Instant Push — Cloudflare Worker entry.
  *
  * Phase 2 Round 2 (这次):
- *  - 升 @rei-standard/amsg-instant 到 ^0.8.0-next.0
+ *  - 升 @rei-standard/amsg-instant 到 ^0.8.0-next.3
  *  - 配置 onLLMOutput hook: SullyOS 业务标签分类器 (见 ./classifier.ts)
  *  - 数据标签 → tool-request push (客户端跑工具, POST /continue 续跑)
  *  - 副作用标签 → finish + metadata.directives (客户端重放)
@@ -192,9 +192,10 @@ export function buildPushDecision(
         },
       }),
       notification,
-      // splitPattern 的禁用必须在外层 request body 上 (见 instantPushClient.ts) —
-      // amsg-instant pickSplitConfig 读的是请求级 payload.splitPattern, hook 返回
-      // 的 pushPayload 上的同名字段会被静默忽略. 这里不重复塞.
+      // splitPattern 统一在外层 request body 上禁 (见 instantPushClient.ts). next.3+
+      // 起 hook 这里也可以塞当 per-push override, 但 SullyOS 所有 push 都想要单条
+      // 不切的统一策略, 集中在客户端管更清晰. per-push 留给将来想做 per-message
+      // 切法的场景, 现在不用.
     };
     warnIfPayloadLarge(pushPayload, deps?.onSizeWarn);
     return { decision: 'tool-request', pushPayload };

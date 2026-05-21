@@ -30,6 +30,7 @@ function buildContentPush(args) {
   if (typeof args.message !== "string") {
     throw new Error("[amsg-shared] ContentPush: 'message' must be a string");
   }
+  validateNotificationArg("ContentPush", args.notification);
   const push = {
     messageKind: "content",
     messageType: args.messageType,
@@ -47,6 +48,7 @@ function buildContentPush(args) {
   if (args.totalMessages !== void 0) push.totalMessages = args.totalMessages;
   if (args.taskId !== void 0) push.taskId = args.taskId;
   if (args.metadata !== void 0) push.metadata = args.metadata;
+  if (args.notification !== void 0) push.notification = args.notification;
   return push;
 }
 function buildReasoningPush(args) {
@@ -85,6 +87,7 @@ function buildToolRequestPush(args) {
   if (!Array.isArray(args.toolCalls) || args.toolCalls.length === 0) {
     throw new Error("[amsg-shared] ToolRequestPush: 'toolCalls' must be a non-empty array");
   }
+  validateNotificationArg("ToolRequestPush", args.notification);
   const push = {
     messageKind: "tool_request",
     messageType: args.messageType,
@@ -99,7 +102,28 @@ function buildToolRequestPush(args) {
   if (args.message !== void 0) push.message = args.message;
   if (args.messageSubtype !== void 0) push.messageSubtype = args.messageSubtype;
   if (args.metadata !== void 0) push.metadata = args.metadata;
+  if (args.notification !== void 0) push.notification = args.notification;
   return push;
+}
+function validateNotificationArg(kind, value) {
+  if (value === void 0) return;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`[amsg-shared] ${kind}: 'notification' must be a plain object`);
+  }
+  const n = (
+    /** @type {Record<string, unknown>} */
+    value
+  );
+  for (const f of ["title", "body", "icon", "badge", "tag"]) {
+    if (n[f] !== void 0 && typeof n[f] !== "string") {
+      throw new Error(`[amsg-shared] ${kind}: 'notification.${f}' must be a string when present`);
+    }
+  }
+  for (const f of ["renotify", "requireInteraction"]) {
+    if (n[f] !== void 0 && typeof n[f] !== "boolean") {
+      throw new Error(`[amsg-shared] ${kind}: 'notification.${f}' must be a boolean when present`);
+    }
+  }
 }
 function buildErrorPush(args) {
   requireField("ErrorPush", "messageType", args.messageType);
@@ -928,18 +952,28 @@ function splitMessageIntoSentences(messageContent, splitPattern = null) {
   }
   return chunks.length > 0 ? chunks : [messageContent];
 }
-function pickSplitConfig(payload, kind) {
+function pickSplitConfig(payload, kind, pushPattern, pushOverridePresent) {
+  const resolveDisabled = (pattern) => pattern === null || Array.isArray(pattern) && pattern.length === 0;
   if (kind === "content" || kind === "tool_request") {
+    if (pushOverridePresent) {
+      return { textField: "message", pattern: pushPattern, disabled: resolveDisabled(pushPattern) };
+    }
     const pattern = payload.splitPattern;
     const disabled = pattern === null || Array.isArray(pattern) && pattern.length === 0;
     return { textField: "message", pattern, disabled };
   }
   if (kind === "reasoning") {
+    if (pushOverridePresent) {
+      return { textField: "reasoningContent", pattern: pushPattern, disabled: resolveDisabled(pushPattern) };
+    }
     const pattern = payload.reasoningSplitPattern;
     const disabled = pattern === void 0 || pattern === null || Array.isArray(pattern) && pattern.length === 0;
     return { textField: "reasoningContent", pattern, disabled };
   }
   if (kind === "error") {
+    if (pushOverridePresent) {
+      return { textField: "message", pattern: pushPattern, disabled: resolveDisabled(pushPattern) };
+    }
     const pattern = payload.errorSplitPattern;
     const disabled = pattern === void 0 || pattern === null || Array.isArray(pattern) && pattern.length === 0;
     return { textField: "message", pattern, disabled };
@@ -955,18 +989,33 @@ function splitHookPushPayload(pushPayload, payload) {
     pushPayload
   );
   const kind = pushObj.messageKind;
-  const cfg = pickSplitConfig(payload || {}, kind);
-  if (!cfg || cfg.disabled) return [pushPayload];
-  const text = pushObj[cfg.textField];
-  if (typeof text !== "string" || text.length === 0) return [pushPayload];
+  const pushPattern = pushObj.splitPattern;
+  const pushOverridePresent = pushPattern !== void 0;
+  let cleanPushObj = pushObj;
+  if (pushOverridePresent) {
+    const validationErr = validateSplitPattern(pushPattern);
+    if (validationErr) {
+      const cleanedErr = validationErr.replace(
+        /^splitPattern(\[\d+\])?\s*/,
+        (_m, idx) => idx ? `${idx} ` : ""
+      );
+      throw new HookError(`pushPayload.splitPattern invalid: ${cleanedErr}`);
+    }
+    const { splitPattern: _strip, ...rest } = pushObj;
+    cleanPushObj = rest;
+  }
+  const cfg = pickSplitConfig(payload || {}, kind, pushPattern, pushOverridePresent);
+  if (!cfg || cfg.disabled) return [cleanPushObj];
+  const text = cleanPushObj[cfg.textField];
+  if (typeof text !== "string" || text.length === 0) return [cleanPushObj];
   const segments = splitMessageIntoSentences(text, cfg.pattern);
-  if (segments.length <= 1) return [pushPayload];
+  if (segments.length <= 1) return [cleanPushObj];
   const total = segments.length;
   return segments.map((segment, i) => {
     const isLast = i === total - 1;
     const chunkMessageId = `msg_${randomUUID()}_chunk_${i}`;
     if (kind === "tool_request" && !isLast) {
-      const { toolCalls: _drop, ...rest } = pushObj;
+      const { toolCalls: _drop, ...rest } = cleanPushObj;
       return {
         ...rest,
         messageKind: "content",
@@ -977,7 +1026,7 @@ function splitHookPushPayload(pushPayload, payload) {
       };
     }
     return {
-      ...pushObj,
+      ...cleanPushObj,
       messageId: chunkMessageId,
       [cfg.textField]: segment,
       messageIndex: i + 1,
@@ -2146,9 +2195,10 @@ function buildPushDecision(input, deps) {
         }
       }),
       notification: notification2
-      // splitPattern 的禁用必须在外层 request body 上 (见 instantPushClient.ts) —
-      // amsg-instant pickSplitConfig 读的是请求级 payload.splitPattern, hook 返回
-      // 的 pushPayload 上的同名字段会被静默忽略. 这里不重复塞.
+      // splitPattern 统一在外层 request body 上禁 (见 instantPushClient.ts). next.3+
+      // 起 hook 这里也可以塞当 per-push override, 但 SullyOS 所有 push 都想要单条
+      // 不切的统一策略, 集中在客户端管更清晰. per-push 留给将来想做 per-message
+      // 切法的场景, 现在不用.
     };
     warnIfPayloadLarge(pushPayload2, deps?.onSizeWarn);
     return { decision: "tool-request", pushPayload: pushPayload2 };
