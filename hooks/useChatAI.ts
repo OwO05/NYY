@@ -1538,6 +1538,16 @@ export const useChatAI = ({
             // Resolve per-character XHS config
             const xhsConf = resolveXhsConfig(char, realtimeConfig);
             let lastXhsNotes: XhsNote[] = []; // Store notes for [[XHS_SHARE:...]] later
+            // 工具调用前角色已经说的话（A）：二次调用会用它当上下文，但默认不会存进聊天，
+            // 导致界面只显示工具后的话（B）。这里把 A 按行存成气泡，保证 A 也显示。
+            const saveXhsPreText = async (text: string) => {
+                const t = (text || '').trim();
+                if (!t) return;
+                for (const line of t.split('\n').map(s => s.trim()).filter(Boolean)) {
+                    await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'text', content: line });
+                }
+                try { setMessages(await DB.getRecentMessagesByCharId(char.id, 200)); } catch { /* ignore */ }
+            };
 
             // [[XHS_SEARCH: 关键词]] - 搜索小红书
             const xhsSearchMatch = aiContent.match(/\[\[XHS_SEARCH:\s*(.+?)\]\]/);
@@ -1555,7 +1565,9 @@ export const useChatAI = ({
                             `${i + 1}. [noteId=${n.noteId}]「${n.title}」by ${n.author} (${n.likes}赞)\n   ${n.desc}`
                         ).join('\n\n');
 
-                        const cleanedForXhs = aiContent.replace(/\[\[XHS_SEARCH:.*?\]\]/g, '').trim() || '让我去小红书看看...';
+                        const preXhsText = aiContent.replace(/\[\[XHS_SEARCH:.*?\]\]/g, '').trim();
+                        await saveXhsPreText(preXhsText);
+                        const cleanedForXhs = preXhsText || '让我去小红书看看...';
                         const xhsMessages = [
                             ...fullMessages,
                             { role: 'assistant', content: cleanedForXhs },
@@ -1607,7 +1619,9 @@ export const useChatAI = ({
                             `${i + 1}. [noteId=${n.noteId}]「${n.title}」by ${n.author} (${n.likes}赞)\n   ${n.desc}`
                         ).join('\n\n');
 
-                        const cleanedForXhs = aiContent.replace(/\[\[XHS_BROWSE(?::.*?)?\]\]/g, '').trim() || '让我刷刷小红书...';
+                        const preXhsText = aiContent.replace(/\[\[XHS_BROWSE(?::.*?)?\]\]/g, '').trim();
+                        await saveXhsPreText(preXhsText);
+                        const cleanedForXhs = preXhsText || '让我刷刷小红书...';
                         const xhsMessages = [
                             ...fullMessages,
                             { role: 'assistant', content: cleanedForXhs },
@@ -1931,7 +1945,9 @@ export const useChatAI = ({
                         ? `\n\n你的主页信息:\n${profileStr}`
                         : '';
 
-                    const cleanedForXhs = aiContent.replace(/\[\[XHS_MY_PROFILE\]\]/g, '').trim() || '让我看看我的小红书...';
+                    const preXhsText = aiContent.replace(/\[\[XHS_MY_PROFILE\]\]/g, '').trim();
+                    await saveXhsPreText(preXhsText);
+                    const cleanedForXhs = preXhsText || '让我看看我的小红书...';
                     const xhsMessages = [
                         ...fullMessages,
                         { role: 'assistant', content: cleanedForXhs },
@@ -2104,7 +2120,9 @@ export const useChatAI = ({
                     }
 
                     const detailFailed = detailStr.startsWith('[加载失败');
-                    const cleanedForXhs = aiContent.replace(/\[\[XHS_DETAIL:.*?\]\]/g, '').trim() || '让我看看这条笔记...';
+                    const preXhsText = aiContent.replace(/\[\[XHS_DETAIL:.*?\]\]/g, '').trim();
+                    await saveXhsPreText(preXhsText);
+                    const cleanedForXhs = preXhsText || '让我看看这条笔记...';
                     const xhsMessages = [
                         ...fullMessages,
                         { role: 'assistant', content: cleanedForXhs },
