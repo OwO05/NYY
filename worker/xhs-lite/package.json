@@ -1,0 +1,15 @@
+{
+  "name": "sullyos-xhs-lite-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SullyOS XHS Lite — Cloudflare Worker that signs Xiaohongshu web API requests in pure JS (no browser, no eval).",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "test": "node test/verify.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^3.78.0"
+  }
+}

@@ -129,6 +129,7 @@ const Settings: React.FC = () => {
   const [rtXhsMcpUrl, setRtXhsMcpUrl] = useState(realtimeConfig.xhsMcpConfig?.serverUrl || 'http://localhost:18060/mcp');
   const [rtXhsNickname, setRtXhsNickname] = useState(realtimeConfig.xhsMcpConfig?.loggedInNickname || '');
   const [rtXhsUserId, setRtXhsUserId] = useState(realtimeConfig.xhsMcpConfig?.loggedInUserId || '');
+  const [rtXhsCookie, setRtXhsCookie] = useState(realtimeConfig.xhsMcpConfig?.cookie || '');
   const [rtTestStatus, setRtTestStatus] = useState('');
 
   // 麦当劳 MCP (token / 启用态都直接存 localStorage, 不进 realtimeConfig)
@@ -590,6 +591,7 @@ const Settings: React.FC = () => {
           xhsMcpConfig: {
               enabled: rtXhsMcpEnabled,
               serverUrl: rtXhsMcpUrl,
+              cookie: rtXhsCookie.trim() || undefined,
               loggedInNickname: rtXhsNickname || undefined,
               loggedInUserId: rtXhsUserId || undefined,
               userXsecToken: realtimeConfig.xhsMcpConfig?.userXsecToken, // 保留自动获取的 token
@@ -658,7 +660,7 @@ const Settings: React.FC = () => {
       }
       setRtTestStatus('正在连接 MCP Server...');
       try {
-          const result = await XhsMcpClient.testConnection(rtXhsMcpUrl);
+          const result = await XhsMcpClient.testConnection(rtXhsMcpUrl, rtXhsCookie.trim() || undefined);
           if (result.connected) {
               const toolCount = result.tools?.length || 0;
               const tokenInfo = result.xsecToken ? ' | xsecToken 已获取' : '';
@@ -673,6 +675,7 @@ const Settings: React.FC = () => {
                   xhsMcpConfig: {
                       enabled: rtXhsMcpEnabled,
                       serverUrl: rtXhsMcpUrl,
+                      cookie: rtXhsCookie.trim() || undefined,
                       loggedInNickname: rtXhsNickname || result.nickname,
                       loggedInUserId: rtXhsUserId || result.userId,
                       userXsecToken: result.xsecToken,
@@ -2073,7 +2076,11 @@ const Settings: React.FC = () => {
                       <div className="space-y-2">
                           <div>
                               <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">服务器 URL</label>
-                              <input value={rtXhsMcpUrl} onChange={e => setRtXhsMcpUrl(e.target.value)} className="w-full bg-white/80 border border-red-200 rounded-xl px-3 py-2 text-[11px] font-mono" placeholder="http://localhost:18060/mcp" />
+                              <input value={rtXhsMcpUrl} onChange={e => setRtXhsMcpUrl(e.target.value)} className="w-full bg-white/80 border border-red-200 rounded-xl px-3 py-2 text-[11px] font-mono" placeholder="https://xhs-lite.<账号>.workers.dev/api" />
+                          </div>
+                          <div>
+                              <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">小红书 Cookie <span className="text-red-400 normal-case">（Lite 模式必填）</span></label>
+                              <textarea value={rtXhsCookie} onChange={e => setRtXhsCookie(e.target.value)} rows={2} className="w-full bg-white/80 border border-red-200 rounded-xl px-3 py-2 text-[10px] font-mono resize-y" placeholder="a1=...; web_session=...; （从浏览器登录后复制完整 cookie）" />
                           </div>
                           <button onClick={testXhsMcp} className="w-full py-2 bg-red-100 text-red-600 text-xs font-bold rounded-xl active:scale-95 transition-transform">测试连接</button>
                           <div className="grid grid-cols-2 gap-2">
@@ -2087,14 +2094,14 @@ const Settings: React.FC = () => {
                               </div>
                           </div>
                           <p className="text-[10px] text-red-500/70 leading-relaxed">
-                              <b>MCP 模式（默认，推荐）:</b> 下载 xiaohongshu-mcp + 运行脚本即可<br/>
-                              URL 填: http://localhost:18060/mcp（通过代理则 18061/mcp）<br/>
+                              <b>⭐ Lite 模式（推荐，零本地依赖）:</b> 部署 worker/xhs-lite 到 Cloudflare<br/>
+                              URL 填: https://xhs-lite.&lt;账号&gt;.workers.dev/api<br/>
+                              再粘贴上面的小红书 cookie 即可，无需 Chrome/隧道/Python<br/>
                               <br/>
-                              <b>Skills 模式（高级）:</b> 额外支持视频发布、长文<br/>
-                              URL 填: http://localhost:18061/api<br/>
-                              需安装 Python + xiaohongshu-skills + 运行 xhs-bridge.mjs<br/>
+                              <b>MCP 模式:</b> 下载 xiaohongshu-mcp + 运行脚本，URL 填 http://localhost:18060/mcp<br/>
+                              <b>Skills 模式:</b> URL 填 http://localhost:18061/api（需 Python + xhs-bridge.mjs）<br/>
                               <br/>
-                              系统根据 URL 结尾自动判断模式（/mcp 或 /api）
+                              系统根据 URL 结尾自动判断模式（/mcp 或 /api）。Lite 模式 = /api 结尾 + cookie。
                           </p>
                       </div>
                   )}

@@ -1,0 +1,10 @@
+name = "xhs-lite"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# Pure-JS signing (sign.js) + Web Crypto (SHA-1/HMAC for COS upload). No extra
+# compatibility_flags needed. No KV/DB — the Worker is stateless; the cookie is
+# supplied per request by the SullyOS frontend (header x-xhs-cookie).
+#
+# Optional secret (only if you want a server-side default cookie instead of the
+# per-request one): wrangler secret put XHS_COOKIE

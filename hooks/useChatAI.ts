@@ -415,6 +415,7 @@ function resolveXhsConfig(char: CharacterProfile, realtimeConfig?: RealtimeConfi
     const mcpConfig = realtimeConfig?.xhsMcpConfig;
     const mcpAvailable = !!(mcpConfig?.enabled && mcpConfig?.serverUrl);
     const mcpUrl = mcpConfig?.serverUrl || '';
+    XhsMcpClient.setCookie(mcpConfig?.cookie); // lite Worker auth (no-op for local backends)
     const loggedInUserId = mcpConfig?.loggedInUserId;
     const loggedInNickname = mcpConfig?.loggedInNickname;
     const userXsecToken = mcpConfig?.userXsecToken;

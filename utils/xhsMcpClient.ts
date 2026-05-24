@@ -25,6 +25,10 @@ const detectMode = (serverUrl: string): BackendMode => {
     return 'mcp'; // default: MCP (backwards compatible)
 };
 
+// Lite-Worker cookie: set from settings, sent as x-xhs-cookie on bridge calls.
+// Local Bridge/Skills servers ignore the header; the cloud Worker requires it.
+let liteCookie = '';
+
 // ==================== Bridge Mode (REST) ====================
 
 const bridgePost = async (
@@ -35,10 +39,13 @@ const bridgePost = async (
     const baseUrl = serverUrl.replace(/\/+$/, '').replace(/\/api$/, '');
     const url = `${baseUrl}/api/${endpoint}`;
 
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (liteCookie) headers['x-xhs-cookie'] = liteCookie;
+
     try {
         const resp = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify(body),
         });
 
@@ -350,7 +357,13 @@ export const XhsMcpClient = {
         mcpDiscoveredTools = [];
     },
 
-    testConnection: async (serverUrl: string): Promise<{ connected: boolean; tools?: string[]; error?: string; nickname?: string; userId?: string; loggedIn?: boolean; xsecToken?: string }> => {
+    // Lite Worker auth: register the XHS cookie used for x-xhs-cookie header.
+    setCookie: (cookie?: string) => {
+        liteCookie = cookie || '';
+    },
+
+    testConnection: async (serverUrl: string, cookie?: string): Promise<{ connected: boolean; tools?: string[]; error?: string; nickname?: string; userId?: string; loggedIn?: boolean; xsecToken?: string }> => {
+        if (cookie !== undefined) liteCookie = cookie;
         const mode = detectMode(serverUrl);
 
         if (mode === 'bridge') {
