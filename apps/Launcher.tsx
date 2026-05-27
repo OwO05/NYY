@@ -231,6 +231,16 @@ const DesktopSquareImage = React.memo(({ image, contentColor, onClick }: {
     );
 });
 
+const CALENDAR_WEEKDAYS = [
+    { key: 'sun', label: 'S' },
+    { key: 'mon', label: 'M' },
+    { key: 'tue', label: 'T' },
+    { key: 'wed', label: 'W' },
+    { key: 'thu', label: 'T' },
+    { key: 'fri', label: 'F' },
+    { key: 'sat', label: 'S' },
+] as const;
+
 // 4. Widget Page Component (Calendar + Events)
 const WidgetsPage = React.memo(({ contentColor, openApp, anniversaries, characters }: any) => {
     const now = new Date();
@@ -258,7 +268,7 @@ const WidgetsPage = React.memo(({ contentColor, openApp, anniversaries, characte
                   </div>
                   
                   <div className="grid grid-cols-7 gap-y-3 gap-x-1 text-center mb-2">
-                      {['S','M','T','W','T','F','S'].map(d => <div key={d} className="text-[10px] font-bold opacity-40" style={{ color: contentColor }}>{d}</div>)}
+                      {CALENDAR_WEEKDAYS.map(day => <div key={day.key} className="text-[10px] font-bold opacity-40" style={{ color: contentColor }}>{day.label}</div>)}
                   </div>
                   
                   <div className="grid grid-cols-7 gap-y-2 gap-x-1 text-center">
