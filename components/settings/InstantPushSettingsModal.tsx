@@ -148,14 +148,15 @@ export const InstantPushSettingsModal: React.FC<InstantPushSettingsModalProps> =
       const result = await probeInstantWorkerVersion(currentCfg());
       if (!result.ok) {
         const errText = result.error || '未知错误';
-        // /version 是新增路由,老 bundle 没有,Cloudflare 通常返 404。提示用户这就是要重新部署的信号。
-        const looksLikeOldBundle = /404|not found/i.test(errText);
+        // 老 bundle 没有 /version 路由 (404), 或者更老的 bundle 把请求透传到 amsg-instant
+        // SDK 入口 (405 / METHOD_NOT_ALLOWED / "Only POST is supported")。
+        // 探针已经按签名判好了 isOldBundle, 这里只决定文案。
         setVersionStatus(
-          looksLikeOldBundle
-            ? `你部署的 Worker 没有 /version 路由,通常意味着是旧版 bundle —— 重新部署即可解决`
+          result.isOldBundle
+            ? `你部署的 Worker 不认识 /version 路由 (${errText}),通常意味着是旧版 bundle —— 重新部署即可解决`
             : `查询失败：${errText}`
         );
-        setVersionStatusKind(looksLikeOldBundle ? 'warning' : 'error');
+        setVersionStatusKind(result.isOldBundle ? 'warning' : 'error');
         return;
       }
       const deployed = result.version!;

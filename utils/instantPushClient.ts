@@ -327,6 +327,15 @@ export interface InstantWorkerVersionResult {
   error?: string;
   /** Worker self-reported INSTANT_WORKER_VERSION (YYYY-MM-DD). */
   version?: string;
+  /**
+   * true 表示 worker 回了但完全不认识 /version 这条路由 —— 通常意味着部署的是
+   * 还没加 /version 拦截的旧 bundle, 要求用户重新部署。
+   * 包含两种典型形态:
+   *  - 404 / "Not Found": 更老的 worker, CF 直接返 404
+   *  - 405 / "Only POST is supported" / METHOD_NOT_ALLOWED: 请求穿透到了 amsg-instant
+   *    SDK 的统一入口, 那里只接 POST
+   */
+  isOldBundle?: boolean;
 }
 
 // ── localStorage helpers ───────────────────────────────────────────────────
@@ -447,13 +456,19 @@ export async function probeInstantWorkerVersion(
     const res = await fetch(`${workerUrl}/version`, { method: 'GET' });
     const { text, parsed } = await resolveSafeFetchText(res);
     if (!res.ok) {
-      return { ok: false, error: parsed?.error?.message ?? `HTTP ${res.status}` };
+      const message = parsed?.error?.message ?? `HTTP ${res.status}`;
+      // 老 bundle 的两种典型签名:
+      //  - 404: 更老的 worker 没有 /version 拦截, CF 直接 not found
+      //  - 405 + 透传到 amsg-instant SDK 入口: 返 METHOD_NOT_ALLOWED / "Only POST is supported"
+      const isOldBundle = res.status === 404
+        || res.status === 405
+        || parsed?.error?.code === 'METHOD_NOT_ALLOWED';
+      return { ok: false, error: message, isOldBundle };
     }
     const version = parsed?.data?.version;
     if (typeof version !== 'string' || !version) {
-      // 旧版 worker 没有 /version 路由,Cloudflare 通常返 404 然后被前面 !res.ok 捕获;
-      // 这里兜底处理 200 但格式不对的情况 (理论上不会发生)。
-      return { ok: false, error: 'Worker 未返回版本号 (可能是旧版部署)', raw: text } as any;
+      // 200 但 body 格式不对: 极少见, 也按"部署对不上"处理, 提示重新部署。
+      return { ok: false, error: 'Worker 未返回版本号', isOldBundle: true };
     }
     return { ok: true, version };
   } catch (e) {
