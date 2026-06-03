@@ -138,20 +138,37 @@ const CHAR_CREATOR_URL = (((import.meta as any).env?.BASE_URL ?? '/') + 'like520
 
 export const CreatorIframe: React.FC<CreatorIframeProps> = ({ mode, charName, presets, isSully, draftKey, title, subtitle, onConfirm }) => {
     const iframeRef = useRef<HTMLIFrameElement>(null);
-    // 自定义部件（开发模式上传）—— 异步从 DB 读出，随 init 注入捏人器
+    // 自定义部件（开发模式上传）—— 异步从 DB 读出
     const extraItemsRef = useRef<any[]>([]);
     const readyRef = useRef(false);
+    const initSentRef = useRef(false);
 
-    const sendInit = useCallback(() => {
-        const iframeWin = iframeRef.current?.contentWindow;
-        if (!iframeWin) return;
-        iframeWin.postMessage({
+    // 最新参数 / 回调放 ref：让订阅与初始化的 effect 只跑一次，
+    // 避免父组件重渲导致反复重发 init（会触发 applyLike520Init 重置当前选择 → "弹回上一个"）
+    const paramsRef = useRef({ mode, charName, presets, isSully, draftKey, title, subtitle });
+    paramsRef.current = { mode, charName, presets, isSully, draftKey, title, subtitle };
+    const onConfirmRef = useRef(onConfirm);
+    onConfirmRef.current = onConfirm;
+
+    // init 只发一次（首次 ready）；之后绝不重发，保住用户的选择
+    const postInit = () => {
+        const w = iframeRef.current?.contentWindow;
+        if (!w) return;
+        const p = paramsRef.current;
+        w.postMessage({
             type: 'like520_init',
-            payload: { mode, charName, presets, isSully: !!isSully, draftKey, title, subtitle, extraItems: extraItemsRef.current },
+            payload: { ...p, isSully: !!p.isSully, extraItems: extraItemsRef.current },
         }, '*');
-    }, [mode, charName, presets, isSully, draftKey, title, subtitle]);
+        initSentRef.current = true;
+    };
+    // 自定义部件单独走 add_items：只合并、不重置选择
+    const postAddItems = () => {
+        const w = iframeRef.current?.contentWindow;
+        if (!w || !extraItemsRef.current.length) return;
+        w.postMessage({ type: 'like520_add_items', payload: { extraItems: extraItemsRef.current } }, '*');
+    };
 
-    // 载入自定义部件；若 iframe 已就绪则补发一次 init 合并进去
+    // 载入自定义部件（一次）；若已就绪则补发 add_items（合并而非重置）
     useEffect(() => {
         let cancelled = false;
         (async () => {
@@ -159,12 +176,13 @@ export const CreatorIframe: React.FC<CreatorIframeProps> = ({ mode, charName, pr
                 const parts = await DB.getCustomCreatorParts();
                 if (cancelled) return;
                 extraItemsRef.current = parts.map(p => ({ categoryKey: p.categoryKey, id: p.id, name: p.name, src: p.src, tintable: !!p.tintable }));
-                if (readyRef.current) sendInit();
+                if (readyRef.current) postAddItems();
             } catch { /* 没有自定义部件时静默 */ }
         })();
         return () => { cancelled = true; };
-    }, [sendInit]);
+    }, []);
 
+    // 消息订阅（一次）
     useEffect(() => {
         const handleMessage = (e: MessageEvent) => {
             if (!e.data || typeof e.data !== 'object') return;
@@ -172,12 +190,10 @@ export const CreatorIframe: React.FC<CreatorIframeProps> = ({ mode, charName, pr
             if (e.source !== iframeWin) return;
 
             if (e.data.type === 'like520_ready') {
-                console.log(`[520][creator:${mode}] iframe ready, sending init (isSully=${!!isSully})`);
                 readyRef.current = true;
-                sendInit();
+                if (!initSentRef.current) postInit();
             } else if (e.data.type === 'like520_result' && e.data.payload) {
-                console.log(`[520][creator:${mode}] result received`);
-                onConfirm({
+                onConfirmRef.current?.({
                     dataUrl: e.data.payload.dataUrl,
                     frameDataUrl: e.data.payload.frameDataUrl,
                     transparentDataUrl: e.data.payload.transparentDataUrl,
@@ -187,7 +203,7 @@ export const CreatorIframe: React.FC<CreatorIframeProps> = ({ mode, charName, pr
         };
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
-    }, [mode, sendInit, onConfirm]);
+    }, []);
 
     return (
         <iframe
