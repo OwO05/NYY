@@ -1,7 +1,33 @@
 import { describe, it, expect } from 'vitest';
 import { chunkNovelText, chunkNovelTextAsync, getReadingWindow, buildNovel } from './novel';
-import { parseVROutput, parseMusicOutput } from './prompts';
+import { parseVROutput, parseMusicOutput, parseGuestbookOutput, parseGymOutput } from './prompts';
 import { decodeBytes } from './decodeText';
+
+describe('parseGuestbookOutput', () => {
+    it('parses posts (with reply) + activity, caps at 2', () => {
+        const raw = [
+            '<彼方>',
+            '<留言 回复="#a1b2">同意楼上</留言>',
+            '<留言>顺便问个问题</留言>',
+            '<留言>第三条应被忽略</留言>',
+            '<动态>在留言簿接了句嘴</动态>',
+            '</彼方>',
+        ].join('\n');
+        const out = parseGuestbookOutput(raw);
+        expect(out.posts).toHaveLength(2);
+        expect(out.posts[0].replyLabel).toBe('a1b2');
+        expect(out.posts[1].replyLabel).toBeUndefined();
+        expect(out.activity).toContain('接了句嘴');
+    });
+});
+
+describe('parseGymOutput', () => {
+    it('parses behavior + activity', () => {
+        const out = parseGymOutput('<行为>和某人打赛博拳击</行为><动态>输得心服口服</动态>');
+        expect(out.behavior).toBe('和某人打赛博拳击');
+        expect(out.activity).toBe('输得心服口服');
+    });
+});
 
 describe('parseMusicOutput', () => {
     it('parses pick / review / behavior / activity', () => {

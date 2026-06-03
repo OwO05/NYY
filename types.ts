@@ -709,8 +709,15 @@ export interface VRCardMeta {
     songLabel?: string;
     /** 本次点/排进队列的自己的歌 */
     queuedLabel?: string;
-    /** 此刻的行为描述（盯着跳/跟唱/给user录…） */
+    /** 此刻的行为描述（盯着跳/跟唱/给user录…；娱乐室也用） */
     behavior?: string;
+    // --- 留言簿专用 ---
+    /** 本次发到留言簿的话（保留正文） */
+    boardPost?: string;
+    /** 回复了谁 */
+    boardReplyToName?: string;
+    /** 这条卡片是"用户在留言簿发言"广播给该 char 的 */
+    userBoardPost?: boolean;
 }
 
 /** 听歌房队列项。 */
@@ -718,6 +725,26 @@ export interface VRMusicQueueItem {
     song: CharPlaylistSong;
     charId: string;
     charName: string;
+}
+
+/** 留言簿（共享版聊墙）的一条留言。 */
+export interface VRGuestbookMessage {
+    id: string;
+    /** 'user' = 用户本人，其余为 charId */
+    authorId: string;
+    authorName: string;
+    content: string;
+    /** 若是回复某条留言 */
+    replyToId?: string;
+    replyToName?: string;
+    createdAt: number;
+}
+
+/** 留言簿共享状态（单例，所有角色 + 用户共用一面墙）。 */
+export interface VRGuestbookState {
+    id: string; // 'board' 单例
+    messages: VRGuestbookMessage[];
+    updatedAt: number;
 }
 
 /** 听歌房共享状态（单例，所有角色共用一个循环队列）。 */
@@ -1867,6 +1894,7 @@ export interface FullBackupData {
     vrAnnotations?: VRNovelAnnotation[]; // 虚拟世界小说批注
     customCreatorParts?: CustomCreatorPart[]; // 捏脸系统自定义部件
     vrMusicRoom?: VRMusicRoomState;            // 听歌房共享状态
+    vrGuestbook?: VRGuestbookState;            // 留言簿共享状态
     songs?: SongSheet[]; // Songwriting app data
     
     // Bank Data

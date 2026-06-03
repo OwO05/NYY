@@ -12,7 +12,7 @@ import { VRScheduler } from '../utils/vrWorld/scheduler';
 import { VR_ROOMS, getRoom, VR_DEFAULT_INTERVAL_MIN } from '../utils/vrWorld/constants';
 import { buildNovelAsync, groupAnnotationsBySeg, getBookmark } from '../utils/vrWorld/novel';
 import { decodeTextFile } from '../utils/vrWorld/decodeText';
-import type { CharacterProfile, VRWorldNovel, VRNovelAnnotation, VRCardMeta, VRRoomId, VRMusicRoomState, CharPlaylistSong } from '../types';
+import type { CharacterProfile, VRWorldNovel, VRNovelAnnotation, VRCardMeta, VRRoomId, VRMusicRoomState, CharPlaylistSong, VRGuestbookState, VRGuestbookMessage } from '../types';
 
 // ============ chibi 形象解析（vrState.chibi → 立绘 → 头像） ============
 interface ChibiDisplay { img: string; scale: number; offsetY: number; flip: boolean; isFallback: boolean; }
@@ -48,7 +48,8 @@ const IDLE_QUIPS: Record<VRRoomId, string[]> = {
 };
 
 const VRWorldApp: React.FC = () => {
-    const { closeApp, characters, updateCharacter, addToast, registerBackHandler } = useOS();
+    const { closeApp, characters, updateCharacter, addToast, registerBackHandler, userProfile } = useOS();
+    const userName = userProfile?.name || '我';
     const [tab, setTab] = useState<Tab>('world');
     const [novels, setNovels] = useState<VRWorldNovel[]>([]);
     const [feed, setFeed] = useState<FeedItem[]>([]);
@@ -127,6 +128,26 @@ const VRWorldApp: React.FC = () => {
         if (n) setReaderJump({ novel: n, seg: segIdx });
     }, [novels]);
 
+    // 用户在留言簿发言：落墙 + 以小卡片广播给所有接入彼方的角色私聊
+    const onUserBoardPost = useCallback(async (content: string) => {
+        const t = content.trim();
+        if (!t) return;
+        const board = (await DB.getVRGuestbook()) || { id: 'board', messages: [], updatedAt: Date.now() };
+        const id = `gb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+        board.messages = [...board.messages, { id, authorId: 'user', authorName: userName, content: t, createdAt: Date.now() }].slice(-200);
+        board.updatedAt = Date.now();
+        await DB.saveVRGuestbook(board);
+        const enabled = characters.filter(c => c.vrState?.enabled);
+        for (const c of enabled) {
+            await DB.saveMessage({
+                charId: c.id, role: 'user', type: 'vr_card',
+                content: `「彼方 · 留言簿」${userName} 在留言墙上发了：${t}`,
+                metadata: { vrCard: true, room: 'guestbook', userBoardPost: true, activity: `${userName} 在留言墙上发了：${t}`, boardPost: t },
+            } as any);
+        }
+        addToast?.(enabled.length > 0 ? `已留言，并广播给 ${enabled.length} 位接入角色` : '已留言', 'success');
+    }, [characters, userName, addToast]);
+
     // 启用某角色（带 chibi 设定门槛）
     const enableChar = (char: CharacterProfile) => {
         const interval = char.vrState?.intervalMinutes || VR_DEFAULT_INTERVAL_MIN;
@@ -204,7 +225,8 @@ const VRWorldApp: React.FC = () => {
             {/* 进入房间场景 */}
             {enterRoom && (
                 <RoomScene roomId={enterRoom} occupants={occupantsByRoom[enterRoom] || []}
-                    latestByChar={latestByChar} onClose={() => setEnterRoom(null)} onJump={jumpToAnnotation} />
+                    latestByChar={latestByChar} onClose={() => setEnterRoom(null)} onJump={jumpToAnnotation}
+                    characters={characters} userName={userName} onUserBoardPost={onUserBoardPost} />
             )}
             {readerNovel && <ReaderModal novel={readerNovel} characters={characters} onClose={() => setReaderNovel(null)} />}
             {readerJump && <ReaderModal novel={readerJump.novel} characters={characters} initialSeg={readerJump.seg} peek onClose={() => setReaderJump(null)} />}
@@ -429,13 +451,38 @@ const RoomScene: React.FC<{
     roomId: VRRoomId; occupants: CharacterProfile[];
     latestByChar: Record<string, FeedItem>; onClose: () => void;
     onJump: (novelId: string | undefined, segIdx: number) => void;
-}> = ({ roomId, occupants, latestByChar, onClose, onJump }) => {
+    characters: CharacterProfile[];
+    userName: string;
+    onUserBoardPost: (content: string) => Promise<void>;
+}> = ({ roomId, occupants, latestByChar, onClose, onJump, characters, userName, onUserBoardPost }) => {
     const room = getRoom(roomId);
     const slots = ROOM_SLOTS[roomId];
     const isMusic = roomId === 'music';
+    const isGuestbook = roomId === 'guestbook';
     const [detail, setDetail] = useState<CharacterProfile | null>(null);
     const [musicState, setMusicState] = useState<VRMusicRoomState | null>(null);
+    const [board, setBoard] = useState<VRGuestbookState | null>(null);
+    const [postText, setPostText] = useState('');
+    const [posting, setPosting] = useState(false);
     const music = useMusic();
+    const nameOfChar = (id: string) => characters.find(c => c.id === id)?.name;
+
+    useEffect(() => {
+        if (!isGuestbook) return;
+        const load = async () => setBoard(await DB.getVRGuestbook());
+        void load();
+        const onDone = () => { void load(); };
+        window.addEventListener('vr-session-done', onDone);
+        return () => window.removeEventListener('vr-session-done', onDone);
+    }, [isGuestbook]);
+
+    const submitPost = async () => {
+        const t = postText.trim();
+        if (!t || posting) return;
+        setPosting(true);
+        try { await onUserBoardPost(t); setPostText(''); setBoard(await DB.getVRGuestbook()); }
+        finally { setPosting(false); }
+    };
 
     useEffect(() => {
         if (!isMusic) return;
@@ -516,6 +563,32 @@ const RoomScene: React.FC<{
                     </div>
                 )}
 
+                {/* 留言簿：版聊墙 */}
+                {isGuestbook && (() => {
+                    const msgs = (board?.messages || []).slice(-60);
+                    return (
+                        <div className="absolute top-14 left-3 right-3 bottom-16 z-20 rounded-2xl overflow-hidden flex flex-col backdrop-blur-md"
+                            style={{ background: 'rgba(10,22,38,0.62)', border: '1px solid rgba(140,200,255,0.22)', boxShadow: '0 8px 26px rgba(0,0,0,.4)' }}>
+                            <div className="px-3 py-2 text-[10px] tracking-[0.25em] text-sky-200/70 border-b border-white/10" style={{ fontFamily: `'Noto Serif SC',serif` }}>留言墙</div>
+                            <div className="flex-1 overflow-y-auto px-3 py-2.5 space-y-2">
+                                {msgs.length === 0 ? (
+                                    <p className="text-[11px] text-white/40 text-center py-6">这面墙还空着。留下第一句话，或等角色们来开帖。</p>
+                                ) : msgs.map((m: VRGuestbookMessage) => {
+                                    const isUser = m.authorId === 'user';
+                                    const name = isUser ? m.authorName : (nameOfChar(m.authorId) || m.authorName);
+                                    return (
+                                        <div key={m.id} className="text-[12px] leading-snug">
+                                            <span className={`font-bold ${isUser ? 'text-sky-300' : 'text-amber-200/90'}`}>{name}</span>
+                                            {m.replyToName && <span className="text-white/35"> ▸ 回 {m.replyToName}</span>}
+                                            <span className="text-white/85">：{m.content}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    );
+                })()}
+
                 {/* chibi 站位 */}
                 {occupants.map((c, i) => {
                     const slot = slots[i % slots.length];
@@ -528,9 +601,26 @@ const RoomScene: React.FC<{
                         </div>
                     );
                 })}
-                {occupants.length === 0 && !isMusic && (
+                {occupants.length === 0 && !isMusic && !isGuestbook && (
                     <div className="absolute inset-0 flex items-center justify-center">
                         <p className="text-white/70 text-[12px] bg-black/30 rounded-full px-4 py-2">这个房间还没有人。去「接入」启用角色吧。</p>
+                    </div>
+                )}
+
+                {/* 留言簿：用户发言（广播给所有接入角色） */}
+                {isGuestbook && (
+                    <div className="absolute bottom-0 left-0 right-0 z-30 flex items-center gap-2 px-3 py-2.5"
+                        style={{ background: 'linear-gradient(0deg,rgba(5,12,22,.92),transparent)' }}>
+                        <input value={postText} onChange={e => setPostText(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') submitPost(); }}
+                            placeholder={`以 ${userName} 的身份留句话…`}
+                            className="flex-1 rounded-full px-4 py-2 text-[12.5px] text-white placeholder-white/35 outline-none backdrop-blur-md"
+                            style={{ background: 'rgba(255,255,255,.08)', border: '1px solid rgba(140,200,255,.25)' }} />
+                        <button onClick={submitPost} disabled={!postText.trim() || posting}
+                            className="h-9 px-4 rounded-full text-[12px] font-semibold text-white disabled:opacity-40 shrink-0"
+                            style={{ background: 'linear-gradient(120deg, rgba(120,180,255,.9), rgba(150,200,235,.85))' }}>
+                            {posting ? '…' : '留言'}
+                        </button>
                     </div>
                 )}
             </div>

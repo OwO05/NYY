@@ -7,7 +7,7 @@
  * 我们解析出 0..n 条批注 + 一句活动播报，落库并注入 vr_card。
  */
 
-import { VRWorldNovel, VRNovelAnnotation, VRMusicRoomState, CharPlaylistSong } from '../../types';
+import { VRWorldNovel, VRNovelAnnotation, VRMusicRoomState, CharPlaylistSong, VRGuestbookMessage } from '../../types';
 import { VRRoomDef } from './constants';
 import { ReadingWindow, groupAnnotationsBySeg } from './novel';
 
@@ -27,7 +27,12 @@ export function buildVRSystemAddendum(room: VRRoomDef, charName: string): string
         `此刻你的化身在游戏里的【${room.name}】。${room.blurb}`,
         `在这里，${room.affordance}`,
         ``,
-        `现在是你一个人玩的时间，不是在跟用户对话、也不是在向谁汇报。你在这儿的所见所感只属于你自己。所以：`,
+        `你在《彼方》里会碰到别的玩家（其他角色的化身）。是否认识某个玩家，只取决于你自己的记忆与设定：`,
+        `· 记忆/设定里本就认识 ta（或通过你认识的人听说过）→ 按你心里那份关系待之；`,
+        `· 没有 → ta 就是你在这游戏里偶遇的陌生玩家，正常社交、别硬认。`,
+        `别的玩家口中的"我对象/我家那位/我的谁/我的用户"等，指的是 ta 自己生活里的人——未必和你认识的任何人是同一个，尤其未必是你的谁；不要因为别人提到亲密的人就自作多情、对号入座、吃醋或破防。每个人的"那个人"都是各自的。也别莫名其妙地把话题中心都让给"用户"。`,
+        ``,
+        `这是你自己的游戏时间，不是在跟用户对话、也不是在向谁汇报。所以：`,
         `- 别把感想拐回到现实里的某个人（尤其别动不动提到用户/对方），就对眼前发生的事本身做反应。`,
         `- 你留下的东西会暴露你是个什么样的人——三观、审美、在意什么、看不起什么、被什么击中。让它们真实，哪怕偏激。`,
         ``,
@@ -39,6 +44,27 @@ export function buildVRSystemAddendum(room: VRRoomDef, charName: string): string
 
 /** 不同房间的"活动姿态"提示。 */
 function roomStanceLines(roomId: string, charName: string): string[] {
+    if (roomId === 'guestbook') {
+        return [
+            `这是版聊。按"${charName}这个人"会在公共留言墙上怎么发言来写，比如（不限于）：`,
+            `· 抛出你正在想的问题、困惑、或一个暴论，看有没有人接；`,
+            `· 接别人的话茬：附和、抬杠、补刀、出主意；`,
+            `· 吃瓜八卦、分享你最近在意的事、对某条热点发表看法；`,
+            `· 聊你的专业 / 爱好 / 人生 / 理想，或者纯粹叽里呱啦发癫；`,
+            `· 如果你心里认识在场或墙上的某个玩家，可以专门冲 ta 聊。`,
+            `想到啥发啥，有你自己的味道就行，别端着。`,
+        ];
+    }
+    if (roomId === 'gym') {
+        return [
+            `这是娱乐室，玩就完了。按"${charName}这个人"会怎么在这儿放开玩来写，比如（不限于）：`,
+            `· 和某个玩家来场赛博拳击 / 全息对战；`,
+            `· 一群人跳舞、蹦迪、开虚拟派对；`,
+            `· 拉人联机打游戏、组队开黑；`,
+            `· 玩点全息小游戏、整点抽象活儿。`,
+            `自由发挥，写出热闹和乐子。能带上在场玩家就带上——认识的按你心里的关系来，不认识的就是一起玩的陌生玩家。`,
+        ];
+    }
     if (roomId === 'music') {
         return [
             `每个人听歌的反应天差地别。按"${charName}这个人"会怎么待在听歌房来写，比如（不限于）：`,
@@ -247,4 +273,106 @@ export function parseVROutput(raw: string): ParsedVROutput {
     if (actMatch) activity = actMatch[1].trim();
 
     return { annotations, activity };
+}
+
+// ============ 留言簿（版聊） ============
+
+const gbLabel = (m: VRGuestbookMessage) => `#${m.id.slice(-4)}`;
+
+export const GUESTBOOK_OUTPUT_FORMAT = [
+    `【输出格式】`,
+    `<彼方>`,
+    `<留言 回复="可选#编号">你要发到留言墙上的话（一条版聊发言：抛话题/接话/吃瓜/聊爱好人生/对热点开麦…按你的人设）</留言>`,
+    `<留言>……想多发一条就再写一条，最多 2 条……</留言>`,
+    `<动态>一句第三人称活动播报，点明你在留言簿干了啥。例：在留言簿回了某人一句嘴 / 抛了个暴论钓鱼。</动态>`,
+    `</彼方>`,
+    ``,
+    `规则：`,
+    `- 至少发 1 条 <留言>；想接某条已有留言就用 回应="#编号" 指向它。`,
+    `- "编号"必须是下面留言墙上真实出现的 #编号。`,
+    `- 这是公共版聊，别只会复读，发点有你味道、有信息量或有乐子的东西。`,
+].join('\n');
+
+export function buildGuestbookRoomTurn(
+    messages: VRGuestbookMessage[],
+    occupantNames: string[],
+    selfName: string,
+    hotTopics?: string[],
+): string {
+    const lines: string[] = [];
+    const others = occupantNames.filter(n => n !== selfName);
+    lines.push(others.length > 0
+        ? `你的化身凑到留言墙前，旁边还有这些玩家在逛：${others.join('、')}。`
+        : `你的化身凑到留言墙前，此刻没什么人，但墙上留着不少话。`);
+    lines.push('');
+
+    const recent = messages.slice(-50);
+    if (recent.length > 0) {
+        lines.push(`留言墙最近的内容（自上而下由旧到新）：`);
+        for (const msg of recent) {
+            const ref = msg.replyToId ? `（回 #${msg.replyToId.slice(-4)}）` : '';
+            lines.push(`${gbLabel(msg)} ${msg.authorName}${ref}：${msg.content}`);
+        }
+    } else {
+        lines.push(`留言墙还空着，没人开过头。`);
+    }
+
+    if (hotTopics && hotTopics.length > 0) {
+        lines.push('');
+        lines.push(`（如果想聊点真实世界的事，这是最近的一些热点，可聊可不聊）：`);
+        hotTopics.slice(0, 6).forEach(t => lines.push(`· ${t}`));
+    }
+
+    lines.push('');
+    lines.push(GUESTBOOK_OUTPUT_FORMAT);
+    return lines.join('\n');
+}
+
+export interface ParsedGuestbookPost { content: string; replyLabel?: string; }
+export interface ParsedGuestbookOutput { posts: ParsedGuestbookPost[]; activity: string; }
+
+export function parseGuestbookOutput(raw: string): ParsedGuestbookOutput {
+    const posts: ParsedGuestbookPost[] = [];
+    const pat = /<留言([^>]*)>([\s\S]*?)<\/留言>/g;
+    let m: RegExpExecArray | null;
+    while ((m = pat.exec(raw)) !== null) {
+        const content = m[2].trim();
+        if (!content) continue;
+        const refMatch = m[1].match(/回复\s*[^0-9A-Za-z]{0,4}([0-9A-Za-z]{2,8})/);
+        posts.push({ content, replyLabel: refMatch ? refMatch[1] : undefined });
+        if (posts.length >= 2) break;
+    }
+    const act = raw.match(/<动态>([\s\S]*?)<\/动态>/);
+    return { posts, activity: act ? act[1].trim() : '' };
+}
+
+// ============ 娱乐室（纯造谣） ============
+
+export const GYM_OUTPUT_FORMAT = [
+    `【输出格式】`,
+    `<彼方>`,
+    `<行为>你在娱乐室具体在玩什么、和谁、玩得怎么样（一到几句，放开了写：赛博拳击/跳舞/虚拟派对/联机开黑/抽象小游戏…随你造）</行为>`,
+    `<动态>一句第三人称活动播报，像游戏成就。例：在娱乐室和某人打了三十回合赛博拳击，输得心服口服。</动态>`,
+    `</彼方>`,
+    ``,
+    `规则：<行为> 和 <动态> 都要写；写出热闹和乐子，别干巴巴。`,
+].join('\n');
+
+export function buildGymRoomTurn(occupantNames: string[], selfName: string): string {
+    const lines: string[] = [];
+    const others = occupantNames.filter(n => n !== selfName);
+    lines.push(others.length > 0
+        ? `你的化身蹦进娱乐室，里面正热闹：${others.join('、')} 都在。`
+        : `你的化身蹦进娱乐室，眼下没别人，但场地和设备随你折腾。`);
+    lines.push('');
+    lines.push(GYM_OUTPUT_FORMAT);
+    return lines.join('\n');
+}
+
+export interface ParsedGymOutput { behavior?: string; activity: string; }
+
+export function parseGymOutput(raw: string): ParsedGymOutput {
+    const beh = raw.match(/<行为>([\s\S]*?)<\/行为>/);
+    const act = raw.match(/<动态>([\s\S]*?)<\/动态>/);
+    return { behavior: beh && beh[1].trim() ? beh[1].trim() : undefined, activity: act ? act[1].trim() : '' };
 }

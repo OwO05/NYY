@@ -7,11 +7,11 @@ import {
     GalleryImage, FullBackupData, GroupProfile, SocialPost, StudyCourse, GameSession, Worldbook, NovelBook, Emoji, EmojiCategory,
     BankTransaction, SavingsGoal, BankFullState, DollhouseState, XhsStockImage, XhsActivityRecord, SongSheet, QuizSession, GuidebookSession,
     LifeSimState, HandbookEntry, Tracker, TrackerEntry, HotNewsSnapshot,
-    VRWorldNovel, VRNovelAnnotation, CustomCreatorPart, VRMusicRoomState
+    VRWorldNovel, VRNovelAnnotation, CustomCreatorPart, VRMusicRoomState, VRGuestbookState
 } from '../types';
 
 const DB_NAME = 'AetherOS_Data';
-const DB_VERSION = 54; // Bumped: v54 add 'vr_music' store (听歌房共享队列状态)
+const DB_VERSION = 55; // Bumped: v55 add 'vr_guestbook' store (留言簿共享版聊墙)
 
 const STORE_CHARACTERS = 'characters';
 const STORE_MESSAGES = 'messages';
@@ -51,6 +51,7 @@ const STORE_VR_NOVELS = 'vr_novels';              // 虚拟世界「彼方」全
 const STORE_VR_ANNOTATIONS = 'vr_annotations';    // 虚拟世界小说批注（per-segment per-char，可互相吐槽）
 const STORE_CC_PARTS = 'cc_custom_parts';         // 捏脸系统自定义部件（开发模式追加，注入捏人器）
 const STORE_VR_MUSIC = 'vr_music';                // 听歌房共享状态（单例 nowPlaying + 循环队列）
+const STORE_VR_GUESTBOOK = 'vr_guestbook';        // 留言簿共享版聊墙（单例 messages）
 
 export interface ScheduledMessage {
     id: string;
@@ -160,6 +161,7 @@ export const openDB = (): Promise<IDBDatabase> => {
           ccStore.createIndex('categoryKey', 'categoryKey', { unique: false });
       }
       createStore(STORE_VR_MUSIC, { keyPath: 'id' });
+      createStore(STORE_VR_GUESTBOOK, { keyPath: 'id' });
 
       createStore(STORE_BANK_TX, { keyPath: 'id' });
       createStore(STORE_BANK_DATA, { keyPath: 'id' });
@@ -1529,6 +1531,26 @@ export const DB = {
       transaction.objectStore(STORE_VR_MUSIC).put({ ...state, id: 'state' });
   },
 
+  // --- 留言簿共享状态（单例 id='board'） ---
+  getVRGuestbook: async (): Promise<VRGuestbookState | null> => {
+      const db = await openDB();
+      if (!db.objectStoreNames.contains(STORE_VR_GUESTBOOK)) return null;
+      return new Promise((resolve) => {
+          const transaction = db.transaction(STORE_VR_GUESTBOOK, 'readonly');
+          const request = transaction.objectStore(STORE_VR_GUESTBOOK).get('board');
+          request.onsuccess = () => resolve(request.result || null);
+          request.onerror = () => resolve(null);
+      });
+  },
+
+  saveVRGuestbook: async (state: VRGuestbookState): Promise<void> => {
+      const db = await openDB();
+      const transaction = db.transaction(STORE_VR_GUESTBOOK, 'readwrite');
+      // 只保留最近 200 条
+      const messages = (state.messages || []).slice(-200);
+      transaction.objectStore(STORE_VR_GUESTBOOK).put({ ...state, id: 'board', messages });
+  },
+
   // --- BANK / PET APP LOGIC ---
   getBankState: async (): Promise<BankFullState | null> => {
       const db = await openDB();
@@ -1708,7 +1730,7 @@ export const DB = {
           });
       };
 
-      const [characters, messages, themes, emojis, emojiCategories, assets, galleryImages, userProfiles, diaries, tasks, anniversaries, roomTodos, roomNotes, groups, journalStickers, socialPosts, courses, games, worldbooks, novels, bankTx, bankData, xhsActivities, xhsStockImages, songs, quizzes, guidebookSessions, scheduledMessages, lifeSimStates, handbooks, trackers, trackerEntries, hotNewsSnapshots, vrNovels, vrAnnotations, customCreatorParts, vrMusic] = await Promise.all([
+      const [characters, messages, themes, emojis, emojiCategories, assets, galleryImages, userProfiles, diaries, tasks, anniversaries, roomTodos, roomNotes, groups, journalStickers, socialPosts, courses, games, worldbooks, novels, bankTx, bankData, xhsActivities, xhsStockImages, songs, quizzes, guidebookSessions, scheduledMessages, lifeSimStates, handbooks, trackers, trackerEntries, hotNewsSnapshots, vrNovels, vrAnnotations, customCreatorParts, vrMusic, vrGuestbook] = await Promise.all([
           getAllFromStore(STORE_CHARACTERS),
           getAllFromStore(STORE_MESSAGES),
           getAllFromStore(STORE_THEMES),
@@ -1746,6 +1768,7 @@ export const DB = {
           getAllFromStore(STORE_VR_ANNOTATIONS),
           getAllFromStore(STORE_CC_PARTS),
           getAllFromStore(STORE_VR_MUSIC),
+          getAllFromStore(STORE_VR_GUESTBOOK),
       ]);
 
       const userProfile = userProfiles.length > 0 ? {
@@ -1777,6 +1800,7 @@ export const DB = {
           vrAnnotations,
           customCreatorParts,
           vrMusicRoom: vrMusic && vrMusic.length ? vrMusic[0] : undefined,
+          vrGuestbook: vrGuestbook && vrGuestbook.length ? vrGuestbook[0] : undefined,
       };
   },
 
@@ -1812,7 +1836,7 @@ export const DB = {
           STORE_TRACKERS,
           STORE_TRACKER_ENTRIES,
           STORE_HOTNEWS,
-          STORE_VR_NOVELS, STORE_VR_ANNOTATIONS, STORE_CC_PARTS, STORE_VR_MUSIC,
+          STORE_VR_NOVELS, STORE_VR_ANNOTATIONS, STORE_CC_PARTS, STORE_VR_MUSIC, STORE_VR_GUESTBOOK,
           'memory_nodes', 'memory_vectors', 'memory_links', 'topic_boxes', 'anticipations', 'event_boxes',
           'memory_batches', 'pixel_home_assets', 'pixel_home_layouts'
       ].filter(name => db.objectStoreNames.contains(name));
@@ -1893,6 +1917,7 @@ export const DB = {
           data.vrAnnotations !== undefined,
           data.customCreatorParts !== undefined,
           data.vrMusicRoom !== undefined,
+          data.vrGuestbook !== undefined,
           data.pixelHomeAssets !== undefined,
           data.pixelHomeLayouts !== undefined,
           data.userProfile !== undefined,
@@ -2137,6 +2162,10 @@ export const DB = {
       await runSection('听歌房', data.vrMusicRoom !== undefined, async () => {
           if (hasStore(STORE_VR_MUSIC) && data.vrMusicRoom) await DB.saveVRMusicRoom(data.vrMusicRoom);
           data.vrMusicRoom = undefined as any;
+      }, 1);
+      await runSection('留言簿', data.vrGuestbook !== undefined, async () => {
+          if (hasStore(STORE_VR_GUESTBOOK) && data.vrGuestbook) await DB.saveVRGuestbook(data.vrGuestbook);
+          data.vrGuestbook = undefined as any;
       }, 1);
       await runSection('歌曲', data.songs !== undefined, async () => {
           await clearAndAdd(STORE_SONGS, data.songs, '歌曲', false);

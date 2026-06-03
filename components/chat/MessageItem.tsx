@@ -1386,7 +1386,9 @@ const MessageItem = React.memo(({
                     {/* 活动播报 */}
                     <div className="px-3 py-2.5">
                         <p className="text-[12.5px] leading-[1.5] text-indigo-50/95">
-                            <span className="font-bold text-amber-200">{charName || 'Ta'}</span> {activity}
+                            {md.userBoardPost
+                                ? activity
+                                : <><span className="font-bold text-amber-200">{charName || 'Ta'}</span> {activity}</>}
                         </p>
                         {excerpts.length > 0 && (
                             <div className="mt-2 space-y-1">
@@ -1400,8 +1402,8 @@ const MessageItem = React.memo(({
                     </div>
                     {/* 页脚 */}
                     <div className="px-3 py-1.5 border-t border-white/10 flex items-center justify-between">
-                        <span className="text-[9px] text-indigo-300/60 italic">Ta 独自度过的时间</span>
-                        <span className="text-[9px] text-amber-200/70 font-bold tracking-wide">＋记忆</span>
+                        <span className="text-[9px] text-indigo-300/60 italic">{md.userBoardPost ? '你发布到留言墙' : 'Ta 独自度过的时间'}</span>
+                        <span className="text-[9px] text-amber-200/70 font-bold tracking-wide">{md.userBoardPost ? '彼方' : '＋记忆'}</span>
                     </div>
                 </div>
             </div>

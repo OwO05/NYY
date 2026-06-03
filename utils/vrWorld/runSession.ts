@@ -17,6 +17,7 @@
 import {
     CharacterProfile, UserProfile, GroupProfile, RealtimeConfig, APIConfig,
     VRWorldNovel, VRCardMeta, VRRoomId, VRMusicRoomState, CharPlaylistSong, CharMusicReview,
+    VRGuestbookState, VRGuestbookMessage,
 } from '../../types';
 import { DB } from '../db';
 import { buildChatRequestPayload } from '../chatRequestPayload';
@@ -29,6 +30,8 @@ import { getReadingWindow, getBookmark, buildAnnotation } from './novel';
 import {
     buildVRSystemAddendum, buildLibraryRoomTurn, parseVROutput,
     buildMusicRoomTurn, parseMusicOutput,
+    buildGuestbookRoomTurn, parseGuestbookOutput,
+    buildGymRoomTurn, parseGymOutput,
 } from './prompts';
 
 /** 记忆管线所需配置的最小形状（避免从 OSContext 反向 import 造成循环依赖）。 */
@@ -84,12 +87,11 @@ function gatherCharSongs(char: CharacterProfile): CharPlaylistSong[] {
     return Array.from(map.values()).sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0)).slice(0, 20);
 }
 
-/** roll 一个房间：图书馆需有书；听歌房需角色有歌单 或 房里正在放歌。 */
+/** roll 一个房间：图书馆需有书；听歌房需有歌单或正在放歌；留言簿/娱乐室恒可去。 */
 function rollRoom(char: CharacterProfile, novels: VRWorldNovel[], musicState: VRMusicRoomState | null): VRRoomId | null {
-    const pool: VRRoomId[] = [];
+    const pool: VRRoomId[] = ['guestbook', 'gym'];
     if (novels.length > 0) pool.push('library');
     if (gatherCharSongs(char).length > 0 || musicState?.nowPlaying) pool.push('music');
-    if (pool.length === 0) return null;
     return pool[Math.floor(Math.random() * pool.length)];
 }
 
@@ -126,14 +128,20 @@ export async function runVRSession(deps: VRSessionDeps): Promise<VRSessionResult
         });
         const systemPrompt = payload.systemPrompt + buildVRSystemAddendum(room, char.name);
 
+        // 在某房间的在场玩家名（含自己）
+        const occupantsOf = (rid: VRRoomId) => {
+            const ns = characters.filter(c => c.vrState?.enabled && c.vrState.currentRoom === rid).map(c => c.name);
+            if (!ns.includes(char.name)) ns.push(char.name);
+            return ns;
+        };
+
         // 房间现场（user turn）
         let roomTurn: string;
-        // library 用
         let novel: VRWorldNovel | null = null;
         let win: ReturnType<typeof getReadingWindow> | null = null;
         let allAnn: Awaited<ReturnType<typeof DB.getVRAnnotations>> = [];
-        // music 用
         let pickable: CharPlaylistSong[] = [];
+        let guestbook: VRGuestbookState | null = null;
 
         if (room.id === 'library') {
             novel = pickNovel(novels, char)!;
@@ -142,13 +150,8 @@ export async function runVRSession(deps: VRSessionDeps): Promise<VRSessionResult
             allAnn = await DB.getVRAnnotations(novel.id);
             const windowAnn = allAnn.filter(a => a.segIdx >= win!.from && a.segIdx < win!.to);
             roomTurn = buildLibraryRoomTurn(novel, win, windowAnn, char.id);
-        } else {
+        } else if (room.id === 'music') {
             pickable = gatherCharSongs(char);
-            const occupantNames = characters
-                .filter(c => c.vrState?.enabled && c.vrState.currentRoom === 'music')
-                .map(c => c.name);
-            if (!occupantNames.includes(char.name)) occupantNames.push(char.name);
-            // 按网易云 id 拉一段当前在放歌曲的歌词（双层缓存；拉不到则无损降级）
             let nowLyric: string[] = [];
             const np = musicState?.nowPlaying;
             if (np) {
@@ -156,7 +159,19 @@ export async function runVRSession(deps: VRSessionDeps): Promise<VRSessionResult
                     nowLyric = await getCharLyricSnippet(loadMusicCfgStandalone(), np.song.id, `${char.id}-${np.song.id}`, 10);
                 } catch { /* 歌词拉取失败不影响 */ }
             }
-            roomTurn = buildMusicRoomTurn(musicState, occupantNames, pickable, char.name, nowLyric);
+            roomTurn = buildMusicRoomTurn(musicState, occupantsOf('music'), pickable, char.name, nowLyric);
+        } else if (room.id === 'guestbook') {
+            guestbook = await DB.getVRGuestbook();
+            let hotTopics: string[] = [];
+            try {
+                const snap: any = await DB.getLatestHotNewsSnapshot();
+                const items: any[] = snap?.items || snap?.list || [];
+                hotTopics = items.map(it => it?.title || it?.name || it?.desc).filter(Boolean);
+            } catch { /* 热点拉不到就不聊 */ }
+            roomTurn = buildGuestbookRoomTurn(guestbook?.messages || [], occupantsOf('guestbook'), char.name, hotTopics);
+        } else {
+            // gym
+            roomTurn = buildGymRoomTurn(occupantsOf('gym'), char.name);
         }
 
         // 调 LLM
@@ -205,7 +220,7 @@ export async function runVRSession(deps: VRSessionDeps): Promise<VRSessionResult
             cardLines = [`「彼方 · ${room.name}」`, `${char.name}${activity}`];
             if (savedExcerpts.length) { cardLines.push('批注：'); for (const ex of savedExcerpts) cardLines.push(`· ${ex}`); }
             meta = { vrCard: true, room: 'library', activity, novelId: novel!.id, novelTitle: novel!.title, segRange: [win!.from, win!.to], annotationExcerpts: savedExcerpts, annotationRefs: savedRefs };
-        } else {
+        } else if (room.id === 'music') {
             // === 听歌房：点歌进队列 + 乐评 + 推进循环队列 ===
             const parsed = parseMusicOutput(aiContent);
             const state: VRMusicRoomState = musicState || { id: 'state', queue: [], updatedAt: Date.now() };
@@ -245,6 +260,43 @@ export async function runVRSession(deps: VRSessionDeps): Promise<VRSessionResult
             if (queuedLabel) cardLines.push(`点了《${queuedLabel}》排进队列`);
             if (parsed.behavior) cardLines.push(`· ${parsed.behavior}`);
             meta = { vrCard: true, room: 'music', activity, songLabel, queuedLabel, behavior: parsed.behavior };
+        } else if (room.id === 'guestbook') {
+            // === 留言簿：发帖/回帖落墙 ===
+            const parsed = parseGuestbookOutput(aiContent);
+            const board: VRGuestbookState = guestbook || { id: 'board', messages: [], updatedAt: Date.now() };
+            const id2 = new Map<string, string>();
+            const id2name = new Map<string, string>();
+            for (const msg of board.messages) { id2.set(msg.id.slice(-4), msg.id); id2name.set(msg.id, msg.authorName); }
+            let firstPost: string | undefined;
+            let firstReplyName: string | undefined;
+            for (const p of parsed.posts) {
+                const replyToId = p.replyLabel ? id2.get(p.replyLabel) : undefined;
+                const replyToName = replyToId ? id2name.get(replyToId) : undefined;
+                const msg: VRGuestbookMessage = { id: genId('gb'), authorId: char.id, authorName: char.name, content: p.content, replyToId, replyToName, createdAt: Date.now() };
+                board.messages.push(msg);
+                id2.set(msg.id.slice(-4), msg.id); id2name.set(msg.id, char.name);
+                if (firstPost === undefined) { firstPost = p.content; firstReplyName = replyToName; }
+            }
+            board.messages = board.messages.slice(-200);
+            board.updatedAt = Date.now();
+            await DB.saveVRGuestbook(board);
+            await updateCharacter(char.id, { vrState: { ...prevState, currentRoom: 'guestbook', lastActiveAt: Date.now() } });
+
+            activity = parsed.activity || (firstPost
+                ? (firstReplyName ? `在留言簿回了 ${firstReplyName} 一句` : `在留言簿发了条帖子`)
+                : '在留言簿逛了逛');
+            cardLines = [`「彼方 · ${room.name}」`, `${char.name}${activity}`];
+            const postEx = firstPost ? (firstPost.length > 70 ? firstPost.slice(0, 70) + '…' : firstPost) : undefined;
+            if (postEx) cardLines.push(firstReplyName ? `回复 ${firstReplyName}：${postEx}` : `留言：${postEx}`);
+            meta = { vrCard: true, room: 'guestbook', activity, boardPost: firstPost, boardReplyToName: firstReplyName };
+        } else {
+            // === 娱乐室：纯造谣行为 ===
+            const parsed = parseGymOutput(aiContent);
+            await updateCharacter(char.id, { vrState: { ...prevState, currentRoom: 'gym', lastActiveAt: Date.now() } });
+            activity = parsed.activity || '在娱乐室疯玩了一通。';
+            cardLines = [`「彼方 · ${room.name}」`, `${char.name}${activity}`];
+            if (parsed.behavior) cardLines.push(`· ${parsed.behavior}`);
+            meta = { vrCard: true, room: 'gym', activity, behavior: parsed.behavior };
         }
 
         await DB.saveMessage({ charId: char.id, role: 'assistant', type: 'vr_card', content: cardLines.join('\n'), metadata: meta });
