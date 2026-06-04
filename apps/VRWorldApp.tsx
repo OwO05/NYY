@@ -15,6 +15,18 @@ import { decodeTextFile } from '../utils/vrWorld/decodeText';
 import { PostOffice, type RemoteReply } from '../utils/vrWorld/postOffice';
 
 const genLocalId = (p: string) => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+
+/** 气泡/动态里去掉开头多余的"自己名字"主语（角色播报本就该省略主语）。 */
+const stripSelfName = (text: string | undefined, name: string | undefined): string => {
+    if (!text) return '';
+    if (!name) return text;
+    const t = text.replace(/^\s+/, '');
+    if (t.startsWith(name)) {
+        const rest = t.slice(name.length).replace(/^[\s，,、：:·\-—]*/, '');
+        if (rest) return rest;
+    }
+    return text;
+};
 import type { CharacterProfile, VRWorldNovel, VRNovelAnnotation, VRCardMeta, VRRoomId, VRMusicRoomState, CharPlaylistSong, VRGuestbookState, VRGuestbookMessage, VRLetter } from '../types';
 
 // ============ chibi 形象解析（vrState.chibi → 立绘 → 头像） ============
@@ -538,8 +550,8 @@ const FeedCard: React.FC<{ item: FeedItem; onJump: (novelId: string | undefined,
                     <span className="text-indigo-300/50">{room.name}</span>
                     <span className="ml-auto text-indigo-300/40 text-[9px]">{new Date(item.timestamp).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                 </div>
-                <p className="text-[11.5px] text-indigo-50/90 mt-0.5 leading-snug">{item.meta.activity}</p>
-                {item.meta.behavior && <p className="text-[10.5px] text-pink-200/80 mt-1 leading-snug">{item.meta.behavior}</p>}
+                <p className="text-[11.5px] text-indigo-50/90 mt-0.5 leading-snug">{stripSelfName(item.meta.activity, item.charName)}</p>
+                {item.meta.behavior && <p className="text-[10.5px] text-pink-200/80 mt-1 leading-snug">{stripSelfName(item.meta.behavior, item.charName)}</p>}
                 {item.meta.annotationRefs && item.meta.annotationRefs.length > 0 ? (
                     <div className="mt-1 space-y-0.5">
                         {item.meta.annotationRefs.slice(0, 3).map((ref, i) => (
@@ -901,7 +913,7 @@ const RoomScene: React.FC<{
                     const slot = slots[i % slots.length];
                     const latest = latestByChar[c.id];
                     const idle = IDLE_QUIPS[roomId][i % IDLE_QUIPS[roomId].length];
-                    const bubble = latest?.meta.activity || idle;
+                    const bubble = latest ? (stripSelfName(latest.meta.activity, c.name) || idle) : idle;
                     return (
                         <div key={c.id} className="absolute" style={{ left: `${slot.x}%`, top: `${slot.y}%`, zIndex: Math.round(slot.y) }}>
                             <Chibi char={c} bubble={bubble} size={104} dance={isMusic} onTap={() => setDetail(c)} />
@@ -945,8 +957,8 @@ const RoomScene: React.FC<{
                             const m = latestByChar[detail.id].meta;
                             return (
                                 <>
-                                    <p className="text-[12.5px] text-indigo-50/90 leading-relaxed">{m.activity}</p>
-                                    {m.behavior && <p className="text-[11px] text-pink-200/80 mt-1.5">{m.behavior}</p>}
+                                    <p className="text-[12.5px] text-indigo-50/90 leading-relaxed">{stripSelfName(m.activity, detail.name)}</p>
+                                    {m.behavior && <p className="text-[11px] text-pink-200/80 mt-1.5">{stripSelfName(m.behavior, detail.name)}</p>}
                                     {m.annotationRefs && m.annotationRefs.length > 0
                                         ? m.annotationRefs.map((ref, i) => (
                                             <button key={i} onClick={() => { onJump(m.novelId, ref.segIdx); setDetail(null); }}
