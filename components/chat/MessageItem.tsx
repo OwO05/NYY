@@ -1430,6 +1430,68 @@ const MessageItem = React.memo(({
         );
     }
 
+    if (m.type === 'vr_card') {
+        const md: any = m.metadata || {};
+        const roomNameMap: Record<string, string> = {
+            library: '图书馆', music: '听歌房', guestbook: '留言簿', gym: '娱乐室', postoffice: '邮局',
+        };
+        const roomInfo = { name: roomNameMap[md.room] || '彼方' };
+        const activity: string = md.activity || '在彼方度过了一段时间。';
+        const excerpts: string[] = Array.isArray(md.annotationExcerpts) ? md.annotationExcerpts : [];
+        const timeStr = new Date(m.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+        const card = (
+            <div className="w-64">
+                <div
+                    className="rounded-xl overflow-hidden border border-indigo-300/40 shadow-[0_4px_16px_rgba(60,40,120,0.22)]"
+                    style={{ background: 'linear-gradient(155deg,#2a2350 0%,#1b1838 100%)' }}
+                >
+                    {/* 头部：彼方 · 房间 */}
+                    <div className="px-3 pt-2.5 pb-2 flex items-center gap-2 border-b border-white/10">
+                        <span className="text-base leading-none text-indigo-200/80" style={{ filter: 'drop-shadow(0 0 5px rgba(170,180,255,.6))' }}>✦</span>
+                        <div className="flex-1 min-w-0">
+                            <div className="text-[9px] tracking-[0.25em] text-indigo-300/80 font-bold uppercase">彼方 · 动态</div>
+                            <div className="text-[12px] text-indigo-100 font-semibold truncate">{roomInfo.name}{md.novelTitle ? ` · 《${md.novelTitle}》` : ''}</div>
+                        </div>
+                        <span className="text-[9px] text-indigo-300/60">{timeStr}</span>
+                    </div>
+                    {/* 活动播报 */}
+                    <div className="px-3 py-2.5">
+                        <p className="text-[12.5px] leading-[1.5] text-indigo-50/95">
+                            {md.userBoardPost
+                                ? activity
+                                : <><span className="font-bold text-amber-200">{charName || 'Ta'}</span> {activity}</>}
+                        </p>
+                        {excerpts.length > 0 && (
+                            <div className="mt-2 space-y-1">
+                                {excerpts.map((ex, i) => (
+                                    <div key={i} className="text-[11px] leading-snug text-indigo-200/80 pl-2 border-l-2 border-amber-300/50">
+                                        {ex}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        {/* 留言簿：把角色在墙上留的原话也显示出来 */}
+                        {Array.isArray(md.boardPosts) && md.boardPosts.length > 0 && (
+                            <div className="mt-2 space-y-1">
+                                {md.boardPosts.map((p: any, i: number) => (
+                                    <div key={i} className="text-[11px] leading-snug text-indigo-100/90 pl-2 border-l-2 border-indigo-300/50">
+                                        {p?.replyToName && <span className="text-indigo-300/70">回 {p.replyToName}：</span>}{p?.content}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                    {/* 页脚 */}
+                    <div className="px-3 py-1.5 border-t border-white/10 flex items-center justify-between">
+                        <span className="text-[9px] text-indigo-300/60 italic">{md.userBoardPost ? '你发布到留言墙' : 'Ta 独自度过的时间'}</span>
+                        <span className="text-[9px] text-amber-200/70 font-bold tracking-wide">{md.userBoardPost ? '彼方' : '＋记忆'}</span>
+                    </div>
+                </div>
+            </div>
+        );
+        return commonLayout(card);
+    }
+
     if (m.type === 'news_card') {
         const md: any = m.metadata || {};
         const title: string = md.title || '热点';

@@ -38,6 +38,8 @@ import MemoryPalaceApp from '../apps/MemoryPalaceApp';
 import HandbookApp from '../apps/HandbookApp';
 import QQBridge from '../apps/QQBridge';
 import HotNewsApp from '../apps/HotNewsApp';
+import VRWorldApp from '../apps/VRWorldApp';
+import CharCreatorDevApp from '../apps/CharCreatorDevApp';
 import { SpecialMomentsApp } from './ValentineEvent';
 import { Like520Controller, shouldShowLike520Popup } from './Like520Event';
 import { UpdateNotificationController, shouldShowUpdateNotification } from './UpdateNotificationEvent';
@@ -564,6 +566,8 @@ const PhoneShell: React.FC = () => {
       case AppID.QQBridge: return <QQBridge />;
       case AppID.HotNews: return <HotNewsApp />;
       case AppID.SpecialMoments: return <SpecialMomentsApp />;
+      case AppID.VRWorld: return <VRWorldApp />;
+      case AppID.CharCreatorDev: return <CharCreatorDevApp />;
       case AppID.Launcher:
       default: return <Launcher />;
     }
