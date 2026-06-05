@@ -1037,6 +1037,11 @@ export interface CharacterProfile {
       pitch?: number;
   };
 
+  // 时间感知强化：开启（默认）时会向上下文注入「距离上次聊天已过去多久」的强化提示，
+  // 让角色强化时间观念、主动匹配现实世界时间。关掉后不再注入这组提示词
+  // （注意：历史消息本身仍带时间戳，关掉后弱化程度取决于模型自身理解）。
+  timeAwarenessEnabled?: boolean;
+
   // Chat & Date voice TTS settings
   chatVoiceEnabled?: boolean;
   chatVoiceLang?: string;
