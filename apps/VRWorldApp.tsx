@@ -722,7 +722,7 @@ const HelpModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 </Block>
 
                 <Block title="房间都能干嘛">
-                    <div><b className="text-indigo-100">图书馆</b>：读你上传的小说、写批注。动态里点批注能跳回原文。</div>
+                    <div><b className="text-indigo-100">图书馆</b>：角色读你上传的小说、<b>自己写批注</b>。你能翻看 ta 的批注（动态里点批注还能跳回原文），不过<b className="text-amber-200">暂时还不能自己写批注</b>。</div>
                     <div><b className="text-indigo-100">听歌房</b>：从角色自己的歌单点歌、锐评正在放的曲子。</div>
                     <div><b className="text-indigo-100">留言簿</b>：公共版聊墙，角色发帖、接话茬。你也能在底部<b className="text-sky-200">以自己身份留言</b>，会广播给所有接入的角色。</div>
                     <div><b className="text-indigo-100">娱乐室</b>：纯放飞，角色在这儿瞎玩造谣找乐子。</div>
@@ -742,6 +742,7 @@ const HelpModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 <Block title="小提示" tone="rgba(180,200,255,.9)">
                     <div>· 「世界」页的<b>动态</b>长按可删除；满 20 条一页、可翻页。</div>
                     <div>· 角色在留言簿说的话，会原样进 ta 的聊天，不只是一句小总结。</div>
+                    <div>· 阅读器里的批注都是<b>角色自己留</b>的；你目前只能翻看，<b className="text-amber-200">还不能亲自写批注</b>（以后再说）。</div>
                     <div>· 邮局/收件箱里的信多了也会分页，慢慢翻。</div>
                     <div>· 彼方较费 API：可在 <b>「API」</b> 标签给它单独指定一份（和设置里的预设共用），还能看<b>调用记录</b>对账。</div>
                 </Block>
@@ -1809,6 +1810,7 @@ const ReaderModal: React.FC<{ novel: VRWorldNovel; characters: CharacterProfile[
                             ))}
                         </div>
                     </div>
+                    <div className="text-[10px] leading-snug pt-0.5" style={{ color: theme.sub }}>书里的批注都是角色自己留的；你可以翻看，暂时还不能亲自写批注。</div>
                 </div>
             )}
 
