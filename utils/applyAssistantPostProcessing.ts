@@ -452,20 +452,33 @@ export async function applyAssistantPostProcessing(
             return merged;
         };
 
+        // 把 [[QUOTE: ...]] / [回复 "..."] 的引用文本解析成"被回复的那条用户消息"。
+        // 开了翻译的外语/粤语角色，引用文本往往是外语、或被 <原文>/<译文> 翻译标签包裹，
+        // 跟库里中文用户消息逐字 includes 匹配会失败 → 之前表现为丢引用 / 空引用气泡。
+        // 这里先剥掉翻译标签再逐字/前缀精确定位；匹配不到就兜底到「最近一条用户文字消息」
+        // （[[QUOTE]] 基本放在回复开头、指代最近一句话，兜底足够稳），杜绝外语角色空引用。
+        const resolveQuoteTarget = (quotedTextRaw: string): { id: number, content: string, name: string } | undefined => {
+            const quotedText = (quotedTextRaw || '')
+                .replace(/<\/?翻译>|<\/?原文>|<\/?译文>/g, '')
+                .replace(/%%BILINGUAL%%/gi, '')
+                .trim();
+            const users = contextMsgs.filter((m: Message) => m.role === 'user' && typeof m.content === 'string' && !!m.content.trim());
+            let targetMsg: Message | undefined;
+            if (quotedText) {
+                targetMsg = users.slice().reverse().find((m: Message) => m.content.includes(quotedText))
+                    || (quotedText.length > 10 ? users.slice().reverse().find((m: Message) => m.content.includes(quotedText.slice(0, 10))) : undefined);
+            }
+            // 兜底：精确匹配失败但角色明确想引用 → 取最近一条用户文字消息，避免空引用
+            if (!targetMsg) targetMsg = users.filter((m: Message) => m.type === 'text' || !m.type).slice(-1)[0] || users.slice(-1)[0];
+            if (!targetMsg) return undefined;
+            const truncated = targetMsg.content.length > 10 ? targetMsg.content.slice(0, 10) + '...' : targetMsg.content;
+            return { id: targetMsg.id, content: truncated, name: userProfile.name };
+        };
+
         // Quote/Reply 目标 (双语路径用)
         let aiReplyTarget: { id: number, content: string, name: string } | undefined;
         const firstQuoteMatch = rawContent.match(QUOTE_RE_DOUBLE) || rawContent.match(QUOTE_RE_SINGLE) || rawContent.match(REPLY_RE_CN);
-        if (firstQuoteMatch) {
-            const quotedText = firstQuoteMatch[1].trim();
-            if (quotedText) {
-                const targetMsg = contextMsgs.slice().reverse().find((m: Message) => m.role === 'user' && m.content.includes(quotedText))
-                    || (quotedText.length > 10 ? contextMsgs.slice().reverse().find((m: Message) => m.role === 'user' && m.content.includes(quotedText.slice(0, 10))) : undefined);
-                if (targetMsg) {
-                    const truncated = targetMsg.content.length > 10 ? targetMsg.content.slice(0, 10) + '...' : targetMsg.content;
-                    aiReplyTarget = { id: targetMsg.id, content: truncated, name: userProfile.name };
-                }
-            }
-        }
+        if (firstQuoteMatch) aiReplyTarget = resolveQuoteTarget(firstQuoteMatch[1]);
 
         let content = ChatParser.sanitize(rawContent, { keepCitations: true });
         content = content.replace(/\[\[INNER_STATE:\s*[\s\S]*?\]\]/g, '').trim();
@@ -574,15 +587,7 @@ export async function applyAssistantPostProcessing(
                         let chunkReplyTarget: { id: number, content: string, name: string } | undefined;
                         const chunkQuoteMatch = chunk.match(QUOTE_RE_DOUBLE) || chunk.match(QUOTE_RE_SINGLE) || chunk.match(REPLY_RE_CN);
                         if (chunkQuoteMatch) {
-                            const quotedText = chunkQuoteMatch[1].trim();
-                            if (quotedText) {
-                                const targetMsg = contextMsgs.slice().reverse().find((m: Message) => m.role === 'user' && m.content.includes(quotedText))
-                                    || (quotedText.length > 10 ? contextMsgs.slice().reverse().find((m: Message) => m.role === 'user' && m.content.includes(quotedText.slice(0, 10))) : undefined);
-                                if (targetMsg) {
-                                    const truncated = targetMsg.content.length > 10 ? targetMsg.content.slice(0, 10) + '...' : targetMsg.content;
-                                    chunkReplyTarget = { id: targetMsg.id, content: truncated, name: userProfile.name };
-                                }
-                            }
+                            chunkReplyTarget = resolveQuoteTarget(chunkQuoteMatch[1]);
                             chunk = chunk.replace(QUOTE_CLEAN_DOUBLE, '').replace(QUOTE_CLEAN_SINGLE, '').replace(REPLY_CLEAN_CN, '').trim();
                         }
 
