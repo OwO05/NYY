@@ -737,15 +737,20 @@ export function parseActorsBatch(raw: string): Record<string, ParsedActorReview>
 export function buildDirectorTurn(
     title: string, logline: string, body: string,
     cast: { roleName: string; actorName: string }[],
+    personas: { actorName: string; roleName: string; persona: string }[],
     notes: { actorName: string; roleName: string; note: string; changes?: string; cooperative: boolean }[],
     bubbleMax: number,
 ): string {
     const roster = cast.map(c => `${c.actorName} 饰 ${c.roleName}`).join('；');
+    const cards = personas.map(p => `· ${p.actorName}（饰 ${p.roleName}）的本色：${p.persona || '（无特别设定）'}`).join('\n');
     const feedback = notes.map(n =>
         `· ${n.actorName}（${n.roleName}）：${n.note}${n.changes ? `；修改方案：${n.changes}` : ''}${n.cooperative ? '' : '【不太配合，请把这种别扭/抗拒自然地揉进演出，别强行抹平】'}`
     ).join('\n');
     return [
         `你是这出舞台剧《${title}》（${logline}）的导演。演员与角色：${roster}。`,
+        '',
+        `**参演演员的本色（关键：写每个人的台词时必须贴合 ta 各自的性格说话方式，绝不能让谁 OOC）**：`,
+        cards || '（无）',
         '',
         '原始剧本：',
         body,
@@ -753,7 +758,7 @@ export function buildDirectorTurn(
         '演员们读完剧本后的意见/修改方案：',
         feedback || '（演员没什么意见）',
         '',
-        `请你**满足演员们合理的需求**，重写并定下最终演出版，然后用下面的格式输出（严格按格式，标签外不要写别的）：`,
+        `请你**满足演员们合理的需求**、并让每句台词都贴合该演员的本色，重写并定下最终演出版，然后用下面的格式输出（严格按格式，标签外不要写别的）：`,
         `<终本>`,
         `每行一拍，用竖线分隔，四种拍：`,
         `旁白|（环境、动作、舞台提示等任何非台词内容都写成旁白）`,
