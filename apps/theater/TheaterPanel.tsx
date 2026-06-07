@@ -435,6 +435,8 @@ const PlaybackView: React.FC<{ play: VRStagedPlay; characters: CharacterProfile[
     }, [play.cast]);
     /** 任意名字 → 该演员的展示名（统一成演员名，便于站位去重/高亮） */
     const canon = (name?: string): string => (name && assignByName.get(name)?.actorName) || name || '';
+    /** 任意名字 → 台上显示的名字（剧本里演的角色名；找不到就原样） */
+    const displayName = (name?: string): string => (name && assignByName.get(name)?.roleName) || name || '';
 
     const onStage = useMemo(() => {
         const s = new Set<string>();
@@ -471,9 +473,9 @@ const PlaybackView: React.FC<{ play: VRStagedPlay; characters: CharacterProfile[
                 <pre style={{ fontSize: 11.5, color: TH.text, whiteSpace: 'pre-wrap', lineHeight: 1.8, borderRadius: 10, padding: 12, marginBottom: 12, background: TH.bg2, border: `1px solid ${TH.line}`, fontFamily: SERIF, maxHeight: '52vh', overflowY: 'auto' }}>
                     {beats.map((b, k) =>
                         b.kind === 'narration' ? `（${b.text}）`
-                        : b.kind === 'enter' ? `——${b.actorName} 上场——`
-                        : b.kind === 'exit' ? `——${b.actorName} 下场——`
-                        : `${b.actorName}：${b.text}`
+                        : b.kind === 'enter' ? `——${displayName(b.actorName)} 上场——`
+                        : b.kind === 'exit' ? `——${displayName(b.actorName)} 下场——`
+                        : `${displayName(b.actorName)}：${b.text}`
                     ).join('\n')}
                 </pre>
             )}
@@ -510,10 +512,10 @@ const PlaybackView: React.FC<{ play: VRStagedPlay; characters: CharacterProfile[
                         ) : beat.kind === 'line' ? (
                             // ★ 唯一保留动森奶油气泡的地方
                             <div style={{ margin: '0 auto', width: 'fit-content', maxWidth: '90%', padding: '10px 15px', borderRadius: 18, fontSize: 13.5, color: '#3a2a20', fontWeight: 600, background: '#fff7ea', border: '2px solid #e8dcc0', boxShadow: '0 4px 0 rgba(0,0,0,.35)' }}>
-                                <span style={{ fontSize: 10, color: '#b9384a', fontWeight: 800, display: 'block', marginBottom: 1 }}>{beat.actorName}</span>{beat.text}
+                                <span style={{ fontSize: 10, color: '#b9384a', fontWeight: 800, display: 'block', marginBottom: 1 }}>{displayName(beat.actorName)}</span>{beat.text}
                             </div>
                         ) : (
-                            <div style={{ textAlign: 'center', fontSize: 10, color: 'rgba(255,210,210,.6)' }}>（{beat.actorName} {beat.kind === 'enter' ? '上场' : '下场'}）</div>
+                            <div style={{ textAlign: 'center', fontSize: 10, color: 'rgba(255,210,210,.6)' }}>（{displayName(beat.actorName)} {beat.kind === 'enter' ? '上场' : '下场'}）</div>
                         )}
                     </div>
                 )}
@@ -530,9 +532,9 @@ const PlaybackView: React.FC<{ play: VRStagedPlay; characters: CharacterProfile[
                                 {c.img ? (
                                     <img src={c.img} alt="" style={{ height: baseH, transform: `scaleX(${c.flip ? -1 : 1}) translateY(${c.offsetY}px)`, objectFit: 'contain', filter: active ? 'drop-shadow(0 0 12px rgba(255,214,130,.75))' : 'drop-shadow(0 6px 6px rgba(0,0,0,.5))' }} />
                                 ) : (
-                                    <div style={{ height: 64, width: 64, borderRadius: 999, background: TH.gold, color: '#2a1810', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 800 }}>{name.slice(0, 1)}</div>
+                                    <div style={{ height: 64, width: 64, borderRadius: 999, background: TH.gold, color: '#2a1810', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 800 }}>{displayName(name).slice(0, 1)}</div>
                                 )}
-                                <span style={{ fontSize: 8.5, color: 'rgba(255,245,235,.9)', marginTop: 3, background: 'rgba(0,0,0,.4)', padding: '1px 7px', borderRadius: 999 }}>{name}</span>
+                                <span style={{ fontSize: 8.5, color: 'rgba(255,245,235,.9)', marginTop: 3, background: 'rgba(0,0,0,.4)', padding: '1px 7px', borderRadius: 999 }}>{displayName(name)}</span>
                             </div>
                         );
                     })}
