@@ -133,8 +133,14 @@ const CHAT_LAYOUT_COMBOS: { name: string; desc: string; config: Partial<OSTheme>
 ];
 
 // --- 桌面整机风格（皮肤）---
+// SVG → data URI。关键：除了 encodeURIComponent，还要把括号也编码掉——否则 SVG 内的
+// fill="url(#id)" / filter="url(#id)" 里的 ')' 会在 CSS background-image: url(data:...) 中
+// 提前闭合外层 url()，导致整张壁纸失效（之前壁纸一直没生效就是栽在这）。
+const svgToDataUri = (svg: string) =>
+  `data:image/svg+xml,${encodeURIComponent(svg).replace(/\(/g, '%28').replace(/\)/g, '%29')}`;
+
 // 动森风壁纸：柔和梦幻的小岛清晨。暖阳 + 景深模糊的远山草坡 + 光斑 + 飘叶，整张内联 SVG。
-const ACNH_WALLPAPER = `data:image/svg+xml,${encodeURIComponent(
+const ACNH_WALLPAPER = svgToDataUri(
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 800" preserveAspectRatio="xMidYMid slice">`
   + `<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">`
   + `<stop offset="0" stop-color="#F8E3CE"/><stop offset="0.32" stop-color="#EDE6D2"/>`
@@ -152,7 +158,7 @@ const ACNH_WALLPAPER = `data:image/svg+xml,${encodeURIComponent(
   + `<circle cx="250" cy="430" r="14" fill="#FFF6D8" opacity="0.4"/></g>`
   + `<g opacity="0.5" fill="#7FB85A"><path d="M50 360 q30 -18 42 6 q-30 18 -42 -6Z"/>`
   + `<path d="M330 470 q26 -16 38 5 q-27 16 -38 -5Z"/></g></svg>`
-)}`;
+);
 
 const DESKTOP_SKINS: { id: string; name: string; desc: string; swatch: string; config: Partial<OSTheme> }[] = [
   {
