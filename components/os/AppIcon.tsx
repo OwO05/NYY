@@ -3,6 +3,7 @@ import React from 'react';
 import { AppConfig } from '../../types';
 import { Icons } from '../../constants';
 import { useOS } from '../../context/OSContext';
+import { getAcnhIcon } from './acnhIcons';
 
 interface AppIconProps {
   app: AppConfig;
@@ -12,12 +13,12 @@ interface AppIconProps {
   variant?: 'default' | 'minimal' | 'dock';
 }
 
-// 动森（NookPhone）风格图标的配色：把各 App 的 Tailwind 色名映射成明快的糖果色方块底。
+// 动森（NookPhone）风格瓦片配色 —— 直接用 animal-island-ui 的应用色板（精确 hex）。
 const NOOK_TILE_COLORS: Record<string, string> = {
-  indigo: '#7E8AE6', violet: '#A584E0', purple: '#B06FD6', fuchsia: '#E07BC6',
-  pink: '#F58FB4', rose: '#F58198', red: '#F47A6E', orange: '#F5A65B',
-  amber: '#F5C24B', lime: '#A8D45C', green: '#6FCB7E', emerald: '#5BC8A0',
-  cyan: '#5BC2D4', blue: '#6FA8E6', slate: '#94A3B8',
+  indigo: '#889DF0', violet: '#B77DEE', purple: '#B77DEE', fuchsia: '#F8A6B2',
+  pink: '#F8A6B2', rose: '#FC736D', red: '#FC736D', orange: '#E59266',
+  amber: '#F7CD67', lime: '#D1DA49', green: '#8AC68A', emerald: '#82D5BB',
+  cyan: '#82D5BB', blue: '#889DF0', slate: '#9A835A',
 };
 
 const AppIcon: React.FC<AppIconProps> = React.memo(({ app, onClick, size = 'md', hideLabel = false, variant = 'default' }) => {
@@ -26,7 +27,7 @@ const AppIcon: React.FC<AppIconProps> = React.memo(({ app, onClick, size = 'md',
   const customIconUrl = customIcons[app.id];
   const isNook = theme.skin === 'animalcrossing';
   // 动森皮肤下标签用深棕色，普通皮肤沿用主题 contentColor。
-  const contentColor = isNook ? '#5b4a2f' : (theme.contentColor || '#ffffff');
+  const contentColor = isNook ? '#725d42' : (theme.contentColor || '#ffffff');
 
   // Standard sizes
   const sizeClasses =
@@ -43,16 +44,17 @@ const AppIcon: React.FC<AppIconProps> = React.memo(({ app, onClick, size = 'md',
         className="flex flex-col items-center gap-1.5 group relative active:scale-95 transition-transform duration-200"
         style={{ WebkitTapHighlightColor: 'transparent' }}
       >
-        {/* NookPhone 风格：饱和糖果色圆角方块 + 白色符号 + 顶部高光 */}
+        {/* NookPhone 圆角方块瓦片（圆角 ~36%，参照 appItem 123px/radius 45px）+ 动森填充图标 */}
         <div
-          className={`${sizeClasses} relative flex items-center justify-center rounded-[1.4rem]
-            border border-white/70 shadow-[0_5px_14px_rgba(80,60,30,0.22)] overflow-hidden`}
-          style={{ backgroundColor: tileColor }}
+          className={`${sizeClasses} relative flex items-center justify-center
+            border-2 border-white/60 shadow-[0_4px_10px_rgba(94,72,59,0.25)] overflow-hidden`}
+          style={{ backgroundColor: tileColor, borderRadius: '34%' }}
         >
           {/* 顶部柔光，营造塑料圆钮质感 */}
-          <div className="absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/40 to-transparent pointer-events-none" />
-          <div className="w-[52%] h-[52%] text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.25)] relative">
-            <IconComponent className="w-full h-full" />
+          <div className="absolute inset-x-0 top-0 h-1/2 pointer-events-none"
+            style={{ background: 'linear-gradient(to bottom, rgba(255,255,255,0.32), transparent)', borderRadius: 'inherit' }} />
+          <div className="w-[64%] h-[64%] relative">
+            {getAcnhIcon(app.id)}
           </div>
         </div>
         {!hideLabel && (

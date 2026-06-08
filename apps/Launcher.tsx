@@ -32,27 +32,27 @@ const DesktopClock = React.memo(() => {
     const hh = virtualTime.hours.toString().padStart(2, '0');
     const mm = virtualTime.minutes.toString().padStart(2, '0');
 
-    // 动森彩蛋：NookPhone「居民代表」奶油时钟卡
+    // 动森彩蛋：NookPhone「居民代表」时钟 HUD（配色对齐 animal-island-ui 的 Time 组件）
     if (theme.skin === 'animalcrossing') {
         return (
-            <div className="mt-6 mb-4 animate-fade-in" style={{ color: '#5b4a2f' }}>
-                <div className="flex items-center gap-1.5 mb-1 text-[12px] font-bold tracking-wide">
+            <div className="mt-6 mb-4 animate-fade-in" style={{ color: '#794f27' }}>
+                <div className="flex items-center gap-1.5 mb-1 text-[13px] font-extrabold tracking-wide">
                     <span>🍃</span><span>{greeting}, Resident</span>
                 </div>
-                <div className="text-[10px] font-semibold tracking-[0.18em] uppercase mb-2.5 opacity-60">Resident Representative</div>
-                <div className="flex items-stretch gap-3 rounded-[1.6rem] p-4"
+                <div className="text-[10px] font-bold tracking-[0.18em] uppercase mb-2.5" style={{ color: '#9f927d' }}>Resident Representative</div>
+                <div className="flex items-stretch gap-5 rounded-[18px] px-6 py-4"
                     style={{
-                        background: 'rgba(255,253,245,0.92)',
-                        border: '2px solid #e6dcc0',
-                        boxShadow: '0 10px 24px -12px rgba(120,90,40,0.45), inset 0 1px 0 rgba(255,255,255,0.7)',
+                        background: 'linear-gradient(180deg,#ffffff 0%,#f8f8f0 100%)',
+                        border: '3px solid #d4cfc3',
+                        boxShadow: '0 8px 24px 0 rgba(61,52,40,0.14)',
                     }}>
-                    <div className="flex flex-col justify-center pr-3 mr-1 border-r-2 border-[#ece2c8]">
-                        <span className="text-[13px] font-extrabold text-[#7cba4c] tracking-[0.15em]">{dayName.slice(0, 3)}</span>
-                        <span className="text-[15px] font-black text-[#6b5435] leading-tight">{dateNum} {monthName}</span>
+                    <div className="flex flex-col justify-center pr-5" style={{ borderRight: '3px solid rgba(159,146,125,0.35)' }}>
+                        <span className="text-[14px] font-black text-[#6fba2c] tracking-[1.5px] uppercase">{dayName.slice(0, 3)}</span>
+                        <span className="text-[22px] font-extrabold text-[#8b7355] leading-tight">{dateNum} {monthName}</span>
                     </div>
                     <div className="flex-1 flex items-center justify-end">
-                        <span className="text-[3.4rem] leading-none font-black text-[#6b5435]" style={{ fontFeatureSettings: '"tnum"' }}>
-                            {hh}<span className="text-[#7cba4c] mx-0.5 animate-pulse">:</span>{mm}
+                        <span className="text-[3rem] leading-none font-black text-[#8b7355] tracking-[2px]" style={{ fontFeatureSettings: '"tnum"' }}>
+                            {hh}<span className="mx-0.5 animate-pulse">:</span>{mm}
                         </span>
                     </div>
                 </div>
@@ -129,9 +129,9 @@ const CharacterWidget = React.memo(({
                 className="relative h-24 w-full overflow-hidden rounded-3xl cursor-pointer transition-transform duration-300 active:scale-[0.98]"
                 onClick={onClick}
                 style={acnh ? {
-                    background: 'rgba(255,253,245,0.92)',
-                    border: '2px solid #e6dcc0',
-                    boxShadow: '0 10px 24px -12px rgba(120,90,40,0.4), inset 0 1px 0 rgba(255,255,255,0.7)',
+                    background: 'rgb(247,243,223)',
+                    border: '2px solid #e8e2d6',
+                    boxShadow: '0 8px 24px 0 rgba(61,52,40,0.14)',
                 } : {
                     background: 'rgba(255,255,255,0.08)',
                     backdropFilter: 'blur(24px) saturate(1.4)',
@@ -156,8 +156,8 @@ const CharacterWidget = React.memo(({
                      {/* 头像 */}
                      <div className="w-[68px] h-[68px] shrink-0 rounded-2xl overflow-hidden relative bg-slate-800"
                          style={{
-                             border: acnh ? '2px solid #e6dcc0' : '1.5px solid rgba(255,255,255,0.25)',
-                             boxShadow: acnh ? '0 4px 12px -4px rgba(120,90,40,0.35)' : '0 4px 14px rgba(0,0,0,0.25)',
+                             border: acnh ? '2px solid #e8e2d6' : '1.5px solid rgba(255,255,255,0.25)',
+                             boxShadow: acnh ? '0 4px 12px -4px rgba(61,52,40,0.25)' : '0 4px 14px rgba(0,0,0,0.25)',
                          }}>
                          {char ? (
                              <img src={char.avatar} className="w-full h-full object-cover" alt="char" loading="lazy" />
@@ -768,7 +768,7 @@ const Launcher: React.FC = () => {
       >
            <div
              className={`rounded-[1.75rem] px-4 py-3 flex gap-3 sm:gap-6 items-center mx-auto max-w-full justify-between overflow-x-auto no-scrollbar transform-gpu ${acnh ? '' : 'bg-white/30 border border-white/25 shadow-[0_8px_40px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.08)]'}`}
-             style={acnh ? { background: 'rgba(255,253,245,0.9)', border: '2px solid #e6dcc0', boxShadow: '0 10px 30px -12px rgba(120,90,40,0.4)' } : undefined}
+             style={acnh ? { background: 'rgb(247,243,223)', border: '2px solid #e8e2d6', boxShadow: '0 8px 24px 0 rgba(61,52,40,0.16)' } : undefined}
            >
                {dockAppsConfig.map(app => (
                    <div key={app.id} className="relative">

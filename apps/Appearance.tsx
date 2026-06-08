@@ -169,7 +169,7 @@ const DESKTOP_SKINS: { id: string; name: string; desc: string; swatch: string; c
     config: {
       skin: 'animalcrossing',
       hue: 95, saturation: 48, lightness: 56,
-      contentColor: '#5b4a2f',
+      contentColor: '#725d42',
       wallpaper: ACNH_WALLPAPER,
       chatAvatarShape: 'rounded', chatAvatarSize: 'medium',
       chatBubbleStyle: 'modern', chatMessageSpacing: 'spacious',
