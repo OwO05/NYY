@@ -148,6 +148,16 @@ const defaults = {
 
 const groupClass = 'rounded-3xl border border-slate-100 bg-white p-5 shadow-sm';
 
+// 白框自定义 CSS 快捷模板：点一下追加进编辑框。可换色 / 贴图 / 改圆角与不规则外形。
+const CHROME_CSS_PRESETS: { name: string; code: string }[] = [
+    { name: '毛玻璃头部', code: '.sully-chat-header{background:rgba(255,255,255,.45)!important;backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px)}' },
+    { name: '渐变头部', code: '.sully-chat-header{background:linear-gradient(135deg,#ffd9ec,#d9c7ff)!important;border-bottom:none!important}' },
+    { name: '头部圆角下沿', code: '.sully-chat-header{border-bottom-left-radius:22px;border-bottom-right-radius:22px}' },
+    { name: '斜切外形', code: '.sully-chat-header{clip-path:polygon(0 0,100% 0,100% 82%,0 100%)}' },
+    { name: '头部贴图', code: '.sully-chat-header{background:url(在此粘贴图片直链) center/cover!important}' },
+    { name: '输入栏毛玻璃', code: '.sully-chat-inputbar{background:rgba(255,255,255,.45)!important;backdrop-filter:blur(22px)}' },
+];
+
 const choices = {
     chrome: [
         { value: 'soft', label: '柔雾', desc: '轻薄玻璃感' },
@@ -497,6 +507,42 @@ export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme }) =>
                 <div className="mt-4">
                     <ChoiceGroup title="发送按钮" items={choices.send} value={sendButtonStyle} onPick={(value) => updateTheme({ chatSendButtonStyle: value as OSTheme['chatSendButtonStyle'] })} />
                 </div>
+            </section>
+
+            <section className={groupClass}>
+                <div className="mb-1">
+                    <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400">白框自定义 (CSS)</h2>
+                    <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
+                        直接写 CSS 自定义聊天「白框」——换色 / 贴图 / 圆角 / 不规则外形（clip-path）。可用选择器：
+                        <code className="mx-0.5 rounded bg-slate-100 px-1 py-0.5 text-slate-500">.sully-chat-header</code>（顶栏）、
+                        <code className="mx-0.5 rounded bg-slate-100 px-1 py-0.5 text-slate-500">.sully-chat-inputbar</code>（输入栏）、
+                        <code className="mx-0.5 rounded bg-slate-100 px-1 py-0.5 text-slate-500">.sully-chat-root</code>（整屏）。覆盖默认色建议加 <code className="rounded bg-slate-100 px-1 text-slate-500">!important</code>。
+                    </p>
+                </div>
+                <div className="mb-3 flex flex-wrap gap-1.5">
+                    {CHROME_CSS_PRESETS.map((p) => (
+                        <button
+                            key={p.name}
+                            onClick={() => updateTheme({ chatChromeCustomCss: (theme.chatChromeCustomCss ? theme.chatChromeCustomCss.trimEnd() + '\n' : '') + p.code })}
+                            className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] font-bold text-slate-600 transition-all hover:bg-slate-200 active:scale-95"
+                        >
+                            + {p.name}
+                        </button>
+                    ))}
+                </div>
+                <textarea
+                    value={theme.chatChromeCustomCss || ''}
+                    onChange={(e) => updateTheme({ chatChromeCustomCss: e.target.value })}
+                    placeholder={'/* 例如 */\n.sully-chat-header{\n  background: linear-gradient(135deg,#ffd9ec,#d9c7ff) !important;\n  border-bottom: none !important;\n}'}
+                    spellCheck={false}
+                    rows={6}
+                    className="w-full resize-y rounded-2xl border border-slate-700 bg-slate-900 p-4 font-mono text-xs leading-relaxed text-slate-200 outline-none focus:border-primary/50 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                />
+                {theme.chatChromeCustomCss && (
+                    <button onClick={() => updateTheme({ chatChromeCustomCss: '' })} className="mt-2 text-[11px] font-semibold text-rose-400 hover:text-rose-500">
+                        清空自定义 CSS
+                    </button>
+                )}
             </section>
 
             <div className="px-2 pb-2 text-center text-[10px] leading-relaxed text-slate-400">
