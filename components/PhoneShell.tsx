@@ -1,7 +1,7 @@
 
 
 
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import { IMPORT_IN_PROGRESS_KEY, useOS } from '../context/OSContext';
 import StatusBar from './os/StatusBar';
 import Launcher from '../apps/Launcher';
