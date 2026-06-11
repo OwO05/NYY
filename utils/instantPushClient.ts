@@ -492,14 +492,18 @@ export async function copyInstantWorkerBundleToClipboard(): Promise<void> {
 /**
  * 生成 Deno Deploy Playground 用的 loader 片段（自动追新部署方式）。
  *
- * 用户贴一次, 之后每次冷启动 loader 先拉站点发布的最新版本号
- * (public/instant-worker.version.txt, 由 build:workers 从
- * utils/instantWorkerVersion.ts 生成, 不会漂移), 再动态 import 带版本号的
- * bundle URL —— 版本一变 URL 就变, Deno 的模块缓存只认旧 URL, 于是必然
- * 重新拉取。效果: 部署一次, 永久自动追新, 用户无需再碰 Playground。
+ * 用户贴一次, 之后每次冷启动 loader 都 fetch 站点发布的最新 bundle 文本,
+ * 塞进 data: URL 再 import。效果: 部署一次, 永久自动追新, 用户无需再碰
+ * Playground。
  *
- * 版本号拉取失败时退回无版本号 URL: Deno 若有缓存副本则继续跑旧版,
- * 比拒绝启动强。
+ * 为什么不直接动态 import 远程 URL: Deno Deploy 线上运行时带 --cached-only,
+ * 只认部署时已缓存的模块, 运行时拼出来的远程 specifier 一律拒载
+ * ("Specifier not found in cache")。而 fetch 拿文本不受模块缓存管制,
+ * data: URL 自带内容不算远程模块, 两步合起来就绕开了封锁 (本地
+ * `deno run --cached-only` 模拟已验证)。
+ *
+ * 站点不可用时 loader 直接抛错起不来 —— 没有可回退的缓存副本, 下次
+ * 冷启动自然重试。
  *
  * @param site 站点根 URL。默认取当前页面 origin + BASE_URL, 自部署站点
  *             因此天然指向自己发布的那份 bundle。
@@ -509,13 +513,11 @@ export function buildDenoLoaderSnippet(site?: string): string {
   if (!resolvedSite.endsWith('/')) resolvedSite += '/';
   return [
     '// SullyOS Instant Push — Deno Deploy loader (自动追新)',
-    '// 整段贴进 dash.deno.com 的 Playground 即可, 之后无需手动更新 worker。',
+    '// 整段贴进 Playground 即可, 之后无需手动更新 worker。',
+    'export {}; // 标记为 module, 顶层 await 才合法',
     `const SITE = ${JSON.stringify(resolvedSite)};`,
-    'let v = "";',
-    'try {',
-    '  v = (await (await fetch(`${SITE}instant-worker.version.txt`, { cache: "no-store" })).text()).trim().replace(/[^0-9A-Za-z._-]/g, "");',
-    '} catch { /* 站点暂时不可用: 退回无版本号 URL */ }',
-    'await import(`${SITE}instant-worker.deno.bundle.js${v ? `?v=${v}` : ""}`);',
+    'const code = await (await fetch(`${SITE}instant-worker.deno.bundle.js`, { cache: "no-store" })).text();',
+    'await import(`data:application/javascript;charset=utf-8,${encodeURIComponent(code)}`);',
     '',
   ].join('\n');
 }

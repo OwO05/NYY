@@ -203,11 +203,12 @@ describe('postSsePayloadToServiceWorker ack 解析', () => {
 });
 
 describe('buildDenoLoaderSnippet', () => {
-  it('生成的片段包含 SITE 常量、版本号 fetch 与动态 import', () => {
+  it('生成的片段: module 标记 + SITE 常量 + fetch 文本 + data: URL import', () => {
     const snippet = buildDenoLoaderSnippet('https://example.com/');
+    expect(snippet).toContain('export {};');
     expect(snippet).toContain('const SITE = "https://example.com/";');
-    expect(snippet).toContain('instant-worker.version.txt');
-    expect(snippet).toContain('await import(`${SITE}instant-worker.deno.bundle.js${v ? `?v=${v}` : ""}`);');
+    expect(snippet).toContain('fetch(`${SITE}instant-worker.deno.bundle.js`, { cache: "no-store" })');
+    expect(snippet).toContain('await import(`data:application/javascript;charset=utf-8,${encodeURIComponent(code)}`);');
   });
 
   it('site 缺尾斜杠时自动补齐, 避免拼出错误 URL', () => {
