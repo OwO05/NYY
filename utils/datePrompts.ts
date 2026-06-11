@@ -18,7 +18,7 @@
  * prompt（peek 旧版手搓 mapper 的问题即在此，已统一修掉）。
  */
 
-import { CharacterProfile, UserProfile, Message, Emoji } from '../types';
+import { CharacterProfile, UserProfile, Message, Emoji, DateStyleConfig } from '../types';
 import { ContextBuilder } from './context';
 import { ChatPrompts } from './chatPrompts';
 import { injectMemoryPalace } from './memoryPalace/pipeline';
@@ -38,6 +38,166 @@ const getRealTimeStr = (): string => {
 
 /** 立绘系统要求必备的五种基础情绪；角色自定义立绘在此之上叠加 */
 export const REQUIRED_DATE_EMOTIONS = ['normal', 'happy', 'angry', 'sad', 'shy'];
+
+// ─────────────────────────────────────────────────────────────
+// 写作风格预设（DateSettings 面板与 prompt 构建共用同一份，别两边手抄）
+// ─────────────────────────────────────────────────────────────
+
+export interface DateStylePreset {
+    id: string;
+    label: string;
+    /** 设置面板里给用户看的一句话简介 */
+    hint: string;
+    /** VN 系统提示里的完整风格块（替换「动作与叙述行的写法」段落） */
+    block: string;
+    /** peek（感知开场）「描写风格」一行用的短语 */
+    peekHint: string;
+}
+
+export const DATE_STYLE_PRESETS: DateStylePreset[] = [
+    {
+        id: 'cinematic',
+        label: '电影感',
+        hint: '默认风格。沉浸式镜头感，感官细节丰富，有呼吸和停顿。',
+        peekHint: '电影感，沉浸式，细节丰富',
+        block: `### ⭐ 动作与叙述行的写法（风格：电影感）
+你不是在列清单，你是在写一个正在发生的场景。每一行动作/叙述都应该让人感受到**此时此刻的空气**。
+
+**具体要求**：
+- 写出**感官**：光线怎么落的、空气什么味道、皮肤什么触感、周围什么声音
+- 写出**节奏**：动作之间有停顿、有犹豫、有呼吸，不要一口气做完三个动作
+- 写出**情绪的痕迹**：不要说"他很紧张"，而是写他的手指在桌面上画了一道看不见的线
+- 让每一行都有**画面**，像电影里的一个镜头
+
+❌ **不要这样写**（只用一个情绪 + 干巴巴的动作罗列）：
+[normal] 把手放下，看向你。
+走到你身边，坐下来。
+拿起杯子，喝了一口水。
+
+✅ **要这样写**（每行标注情绪 + 有呼吸感的叙述）：
+[normal] 指尖从发梢滑落，垂在身侧。视线转过来的时候并不急，像是刚好、又像是故意。
+[shy] "……你一直在看我吗？"
+[happy] 嘴角的弧度藏不住，像是被戳中了什么小心思。
+[normal] 脚步踩在木地板上的声音很轻。在你旁边坐下来，衣料带过一缕还没散尽的冷风。`,
+    },
+    {
+        id: 'plain',
+        label: '简洁白描',
+        hint: '短句克制，不堆形容词，动作干净，靠留白说话。',
+        peekHint: '简洁白描，短句克制，多留白',
+        block: `### ⭐ 动作与叙述行的写法（风格：简洁白描）
+用最少的字写最准的动作。短句，克制，不堆形容词，不滥用比喻。
+
+**具体要求**：
+- 一行只做一件事，动作干净利落
+- 情绪藏在"做了什么/没做什么"的选择里，不点破、不渲染
+- 善用留白：话说一半，停下来，让沉默自己说话
+
+❌ **不要**：堆砌华丽辞藻、一行塞三个动作、直接写"他很开心/紧张"。
+✅ **示例**：
+[normal] 放下杯子。
+[normal] "来了。"
+[shy] 视线挪开，落在窗外。`,
+    },
+    {
+        id: 'lyrical',
+        label: '细腻文艺',
+        hint: '绵密温柔，心理与感官交织，可用比喻和意象。',
+        peekHint: '细腻文艺，感官与心理交织，意象贴合情绪',
+        block: `### ⭐ 动作与叙述行的写法（风格：细腻文艺）
+绵密、温柔、向内。心理活动和感官交织，可以用比喻和意象，但必须贴合此刻的情绪，不为修辞而修辞。
+
+**具体要求**：
+- 写光线、温度、气味这些容易被忽略的细节
+- 动作之外，写动作背后那一层没说出口的心事
+- 允许长句，但每一行仍只承载一个情绪节拍
+
+✅ **示例**：
+[normal] 茶杯沿上的热气慢慢散了，像一句没说完就被收回去的话。
+[shy] "……今天的风，把人吹得有点想说实话。"
+[happy] 指尖在桌面轻轻敲了两下，藏不住的雀跃顺着指节漏出来。`,
+    },
+    {
+        id: 'playful',
+        label: '轻快幽默',
+        hint: '节奏明快，生活化，带点俏皮和小吐槽。',
+        peekHint: '轻快幽默，生活化，带点俏皮',
+        block: `### ⭐ 动作与叙述行的写法（风格：轻快幽默）
+节奏明快，生活化，像情景喜剧的分镜，不端着。
+
+**具体要求**：
+- 动作可以夸张一点点，但要可爱不要闹剧
+- 台词口语化，可以打趣、抬杠、自我吐槽
+- 幽默来自细节和反差，不是硬讲笑话
+
+✅ **示例**：
+[happy] 叼着吸管，含糊不清地比了个"过来"的手势。
+[normal] "你再迟到一分钟，这杯奶茶里的珍珠就要被我替你报仇了。"
+[shy] 说完自己先没绷住，耳朵尖红了一点。`,
+    },
+    {
+        id: 'intense',
+        label: '浓烈炽热',
+        hint: '情绪张力拉满，呼吸、心跳、距离感，克制边缘的爆发。',
+        peekHint: '张力浓烈，感官冲击具体，空气绷紧',
+        block: `### ⭐ 动作与叙述行的写法（风格：浓烈炽热）
+情绪张力拉满。呼吸、心跳、距离感，每一行都往前压一步。
+
+**具体要求**：
+- 感官冲击要具体：温度、力度、停在半空的手
+- 沉默和对视也是戏，写出空气绷紧的感觉
+- 浓烈不等于直白嘶吼，克制边缘的爆发更有力量
+
+✅ **示例**：
+[normal] 一步，又一步。影子先碰到了你的影子。
+[angry] "刚才那句话，再说一遍。"
+[shy] 呼吸在离得很近的地方，乱了半拍。`,
+    },
+];
+
+const DEFAULT_STYLE_ID = 'cinematic';
+
+const getStylePreset = (config?: DateStyleConfig): DateStylePreset =>
+    DATE_STYLE_PRESETS.find(p => p.id === (config?.style || DEFAULT_STYLE_ID)) || DATE_STYLE_PRESETS[0];
+
+/**
+ * 叙事人称块。pov 未设置时返回空串（不注入，沿用模型默认写法）。
+ * 放在风格块之后：风格示例里的人称只是格式示意，以本节为准（块内已注明）。
+ */
+const buildPovBlock = (config: DateStyleConfig | undefined, charName: string, userName: string): string => {
+    const uname = userName || '对方';
+    switch (config?.pov) {
+        case 'third-name':
+            return `### 叙事人称（必须严格遵守）
+叙述行使用**第三人称**：称呼你自己为「${charName}」，称呼对方为「${uname}」。叙述里不要出现"我""你"。
+示例：${charName}看向${uname}，伸手替${uname}拢了拢被风吹乱的头发。
+（台词引号内不受限，正常说话即可。上方风格示例中的人称仅为格式示意，一律以本节为准。）
+`;
+        case 'third-you':
+            return `### 叙事人称（必须严格遵守）
+叙述行中称呼你自己为「${charName}」（第三人称），称呼对方为"你"。叙述里不要用"我"指代自己。
+示例：${charName}看向你，伸手替你拢了拢被风吹乱的头发。
+（台词引号内不受限，正常说话即可。上方风格示例中的人称仅为格式示意，一律以本节为准。）
+`;
+        case 'first-you':
+            return `### 叙事人称（必须严格遵守）
+叙述行使用**第一人称**：称呼你自己为"我"，称呼对方为"你"。不要在叙述里用自己的名字指代自己。
+示例：我看向你，伸手替你拢了拢被风吹乱的头发。
+（上方风格示例中的人称仅为格式示意，一律以本节为准。）
+`;
+        default:
+            return '';
+    }
+};
+
+/** 自定义补充文风要求块。为空时不注入。 */
+const buildExtraStyleBlock = (config?: DateStyleConfig): string => {
+    const extra = (config?.extra || '').trim();
+    if (!extra) return '';
+    return `### 用户对文风的额外要求（优先级高于风格预设）
+${extra}
+`;
+};
 
 const getDateEmotions = (char: CharacterProfile): string[] =>
     [...REQUIRED_DATE_EMOTIONS, ...(char.customDateSprites || [])];
@@ -83,10 +243,15 @@ const flattenHistoryToText = (apiMessages: ApiMessage[]): string =>
 /**
  * VN 模式系统提示（send 与 reroll 共用同一份，避免两处手抄漂移）。
  * reroll 的差异只体现在末尾 user 消息的 System Note 里，不在这里分叉。
+ * 风格 / 人称 / 自定义补充按 char.dateStyleConfig 动态拼装。
  */
-const buildVNModeBlock = (char: CharacterProfile): string => {
+const buildVNModeBlock = (char: CharacterProfile, userName: string): string => {
     const timeStr = getRealTimeStr();
     const dateEmotions = getDateEmotions(char);
+    const styleConfig = char.dateStyleConfig;
+    const preset = getStylePreset(styleConfig);
+    const povBlock = buildPovBlock(styleConfig, char.name, userName);
+    const extraBlock = buildExtraStyleBlock(styleConfig);
     return `### [Visual Novel Mode: 视觉小说脚本模式]
 你正在与用户进行**面对面**的互动。这不是聊天，是一场真实的见面。
 
@@ -96,27 +261,9 @@ const buildVNModeBlock = (char: CharacterProfile): string => {
 2. **情绪标签**: **每一行都必须以** \`[emotion]\` **开头**，表示该行的表情立绘。情绪随内容变化——台词温柔就用 [happy]，动作紧张就用 [shy]，语气冲就用 [angry]。**不要整段只用一个情绪，要逐行根据语境切换。** 仅限使用以下情绪: ${dateEmotions.join(', ')}。不要使用任何不在此列表中的标签。
 3. **格式**: 台词用双引号 **"..."**，动作/叙述直接写（不加引号）。
 
-### ⭐ 动作与叙述行的写法
-你不是在列清单，你是在写一个正在发生的场景。每一行动作/叙述都应该让人感受到**此时此刻的空气**。
+${preset.block}
 
-**具体要求**：
-- 写出**感官**：光线怎么落的、空气什么味道、皮肤什么触感、周围什么声音
-- 写出**节奏**：动作之间有停顿、有犹豫、有呼吸，不要一口气做完三个动作
-- 写出**情绪的痕迹**：不要说"他很紧张"，而是写他的手指在桌面上画了一道看不见的线
-- 让每一行都有**画面**，像电影里的一个镜头
-
-❌ **不要这样写**（只用一个情绪 + 干巴巴的动作罗列）：
-[normal] 把手放下，看向你。
-走到你身边，坐下来。
-拿起杯子，喝了一口水。
-
-✅ **要这样写**（每行标注情绪 + 有呼吸感的叙述）：
-[normal] 指尖从发梢滑落，垂在身侧。视线转过来的时候并不急，像是刚好、又像是故意。
-[shy] "……你一直在看我吗？"
-[happy] 嘴角的弧度藏不住，像是被戳中了什么小心思。
-[normal] 脚步踩在木地板上的声音很轻。在你旁边坐下来，衣料带过一缕还没散尽的冷风。
-
-### 场景上下文
+${povBlock}${extraBlock}### 场景上下文
 1. **Time**: 当前时间 ${timeStr}。
 2. **Location**: 你们现在**面对面**。
 3. **Context**: 参考历史记录。如果刚刚才看到开场白（Opening），请自然接话。
@@ -175,6 +322,11 @@ export const DatePrompts = {
 
         const baseContext = ContextBuilder.buildCoreContext(char, userProfile, false);
 
+        // 文风预设也作用于开场感知；人称（pov）刻意不作用——peek 的设计就是
+        // 第三人称旁观镜头（用户还没"走过去"），人称指令只影响 session 内叙述
+        const preset = getStylePreset(char.dateStyleConfig);
+        const extraBlock = buildExtraStyleBlock(char.dateStyleConfig);
+
         // 根据时间间隔选择合适的分隔符
         const contextSeparator = gapHint
             ? `\n\n--- [TIME SKIP: ${gapHint}] ---\n\n`
@@ -193,7 +345,8 @@ export const DatePrompts = {
 ### 逻辑检查
 1. **上下文连贯性**: 参考 [最近记录]（注意消息来源标签：[聊天]是文字聊天、[约会]是面对面、[通话]是语音通话）。如果有 [TIME SKIP] 且间隔很久，开启新场景；如果是 [SCENE CONTINUATION]，说明刚刚还在聊天，**必须**自然衔接最近的聊天话题和情绪状态，不要无视之前的对话内容。
 2. **状态一致性**: ${gapHint.includes('天') ? '如果间隔了很多天，可能在发呆、忙碌或者有点落寞。' : '根据最近的聊天内容和情绪来决定当前状态。如果刚聊完，角色的状态应该与聊天内容相呼应。'}
-3. **描写风格**: 电影感，沉浸式，细节丰富。不要输出任何前缀，直接输出描写内容。`;
+3. **描写风格**: ${preset.peekHint}。不要输出任何前缀，直接输出描写内容。
+${extraBlock ? `\n${extraBlock}` : ''}`;
 
         return {
             messages: [
@@ -223,7 +376,7 @@ export const DatePrompts = {
         // 向量召回挂到 char.memoryPalaceInjection，buildCoreContext 会读取
         await injectMemoryPalace(char, allMsgs, undefined, userProfile?.name);
         const systemPrompt = ContextBuilder.buildCoreContext(char, userProfile)
-            + buildVNModeBlock(char);
+            + buildVNModeBlock(char, userProfile?.name || '');
 
         const note = variant === 'send'
             ? `(System Note: 严格遵守 VN 格式。每一行都要以 [emotion] 开头，根据内容逐行切换情绪标签，不要整段只用同一个。叙述行写出场景的呼吸感，不要罗列动作。)`
