@@ -1416,6 +1416,15 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               return;
           }
 
+          // 用户正在 DateApp 里和这个角色见面 —— 人就在对方眼前，再发一条
+          // 线上主动消息既出戏又显得对见面毫不知情。本轮静默跳过；
+          // lastFire 已在调度层记录，下个周期会重新评估。
+          if (activeAppRef.current === AppID.Date && activeCharIdScheduleRef.current === charId) {
+              drainQueuedProactive();
+              console.log(`🔕 [Proactive/Global] Skipped for ${char.name}: 正在见面 (DateApp active)`);
+              return;
+          }
+
           // Determine which API to use
           const pCfg = char.proactiveConfig;
           const useSecondary = pCfg?.useSecondaryApi && pCfg.secondaryApi?.baseUrl;
@@ -1449,11 +1458,26 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
               // 2. Save hidden system hint
               const userName = currentUserProfile?.name || '对方';
+
+              // 见面（DateApp）感知：见面消息可能已被记忆宫殿高水位归档，上面 hwm 过滤后的
+              // recentMsgs 会漏判，所以单独用 includeProcessed=true 读最后一条真实消息。
+              // 刚见完面还发"你好久没找我了"会显得对见面毫不知情，换成见面后的语境。
+              const lastRealMsgRaw = (await DB.getRecentMessagesByCharId(charId, 10, true))
+                  .filter(m => !m.metadata?.proactiveHint)
+                  .pop();
+              const DATE_AFTERGLOW_MS = 3 * 60 * 60 * 1000;
+              const justMetOffline = lastRealMsgRaw?.metadata?.source === 'date'
+                  && (now.getTime() - lastRealMsgRaw.timestamp) < DATE_AFTERGLOW_MS;
+
+              const hintContent = justMetOffline
+                  ? `[系统提示（非${userName}发言）: 现在是 ${timeStr}。你和${userName}刚刚在线下见过面（如果上下文里有标着 [约会] 的内容，那就是你们见面时发生的事），现在你们暂时分开了，你拿起手机想给${userName}发条消息。请基于刚才的见面来发——可以回味见面里的某个细节、补一句当时没说出口的话、关心${userName}到家了没，或者就是刚分开就有点想念。绝对不要表现得好像很久没联系，更不要对刚才的见面毫不知情。一两句话就好。]`
+                  : `[系统提示（非${userName}发言）: 现在是 ${timeStr}。${timeSinceUser ? `${userName}已经 ${timeSinceUser} 没有找你说话了。` : ''}这是系统给你的一次主动发消息机会——${userName}并没有在跟你说话，是你想主动找${userName}。像真人一样随意地发条消息吧，比如：随手拍了张照片想分享、刚看到个有趣的事想说、突然想到个冷知识、吐槽今天的天气/食物/见闻、或者就是单纯想找${userName}聊几句。不要刻意，不要像在"汇报近况"，就像你真的拿起手机随手发了条消息。一两句话就好。${timeSinceUser && parseInt(timeSinceUser) > 2 ? `（${userName}挺久没找你了，你也可以表达想念、好奇${userName}在干嘛、或者小小地抱怨一下。）` : ''}]`;
+
               await DB.saveMessage({
                   charId,
                   role: 'user',
                   type: 'text',
-                  content: `[系统提示（非${userName}发言）: 现在是 ${timeStr}。${timeSinceUser ? `${userName}已经 ${timeSinceUser} 没有找你说话了。` : ''}这是系统给你的一次主动发消息机会——${userName}并没有在跟你说话，是你想主动找${userName}。像真人一样随意地发条消息吧，比如：随手拍了张照片想分享、刚看到个有趣的事想说、突然想到个冷知识、吐槽今天的天气/食物/见闻、或者就是单纯想找${userName}聊几句。不要刻意，不要像在"汇报近况"，就像你真的拿起手机随手发了条消息。一两句话就好。${timeSinceUser && parseInt(timeSinceUser) > 2 ? `（${userName}挺久没找你了，你也可以表达想念、好奇${userName}在干嘛、或者小小地抱怨一下。）` : ''}]`,
+                  content: hintContent,
                   metadata: { proactiveHint: true, hidden: true }
               });
 
