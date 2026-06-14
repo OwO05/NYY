@@ -239,47 +239,15 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
             ? summarySource.slice().reverse().map(e => e.summary).join('\n')
             : undefined;
 
-        // 最近的社交动态（喂给 NPC 引擎去点赞/评论；ref = round_charId_postIdx，回填到 world.feedReactions）
-        const recentPostsForNpc: { ref: string; name: string; post: string }[] = [];
-        for (const ep of summarySource.slice(0, 2)) {
-            for (const b of ep.beats) {
-                (b.phone?.posts || []).forEach((post, idx) => recentPostsForNpc.push({ ref: `${ep.round}_${b.charId}_${idx}`, name: b.charName, post }));
-            }
-        }
-
-        // ── 1. NPC 世界引擎（一次调用全搞定；没有 NPC 就跳过） ──
+        // NPC 引擎改到角色之后跑（见 ── 2.5 ──）：这样 NPC 能看到角色这一轮刚发的私聊/动态/
+        // 群聊，当轮就回应。角色这一轮看到的「镇上动静」用上一轮 NPC 的产出——和角色彼此错一
+        // 轮接话是一致的模型。本轮 NPC 的产出存进 episode、并在下一轮被角色接住。
+        const lastNpcScene = lastEpisodes[0]?.npcScene;
+        const lastNpcHooks = lastEpisodes[0]?.npcHooks || [];
         let npcScene: string | undefined;
         let npcHooks: string[] = [];
-        if (world.npcs.length > 0) {
-            try {
-                const npcData = await safeFetchJson(`${baseUrl}/chat/completions`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${api.apiKey || 'sk-none'}` },
-                    body: JSON.stringify({
-                        model: api.model,
-                        messages: [{ role: 'user', content: buildNpcTurn({ world, members, storyTime, lastSummary, chapterAtmosphere: latestChapter?.atmosphere, inboxes: npcInboxes(world), recentPosts: recentPostsForNpc.slice(0, 10) }) }],
-                        temperature: 0.9, stream: false,
-                    }),
-                }, 2, 0, { appName: '家园', purpose: `NPC世界引擎 · ${world.name}` });
-                const parsed = parseNpcScene(npcData.choices?.[0]?.message?.content || '');
-                npcScene = parsed.scene || undefined;
-                npcHooks = parsed.hooks;
-                // NPC 在世界群聊里冒泡 + 回复成员的私信（先落线程，角色们这轮就能看到并接话）
-                applyNpcGroupLines(world, parsed.groupLines, round, storyTime);
-                applyNpcDms(world, parsed.dms, members, round, storyTime);
-                // 动态的点赞/评论（NPC + 路人）回填
-                if (parsed.feedReactions.length > 0) {
-                    world.feedReactions = { ...(world.feedReactions || {}) };
-                    for (const r of parsed.feedReactions) world.feedReactions[r.ref] = { likes: r.likes, comments: r.comments };
-                }
-            } catch (e) {
-                // NPC 失败不阻塞角色演绎——世界这半天只是安静一点
-                console.warn('[WorldHome] NPC engine failed, continuing without npcScene:', e);
-            }
-        }
-        dispatch('world-beat-done', { worldId: world.id, stage: 'npc', done: 0, total: members.length });
 
-        // ── 2. 链式角色演绎（每角色一次独立调用，后者能"看到"前者的公开行为） ──
+        // ── 1. 链式角色演绎（每角色一次独立调用，后者能"看到"前者的公开行为） ──
         const memberNames = members.map(m => m.name);
         const lastBeats = lastEpisodes[0]?.beats || [];
         const beats: WorldCharBeat[] = [];
@@ -316,7 +284,7 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
                     : undefined;
                 const turn = buildWorldCharTurn({
                     world, char, members, storyTime, round, lastSummary,
-                    npcScene, npcHooks, beatsSoFar: beats,
+                    npcScene: lastNpcScene, npcHooks: lastNpcHooks, beatsSoFar: beats,
                     recentPosts: collectRecentPosts(lastBeats, beats),
                     exposures: buildExposures(world, char.id, char.name),
                     directive: directive ? { impulseText: directive.impulseText, text: directive.text } : undefined,
@@ -349,6 +317,39 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
         }
 
         if (!anyCharOk) return { ok: false, reason: 'all-beats-failed' };
+
+        // ── 2.5 NPC 世界引擎（角色之后跑）：回应本轮角色发来的私聊、给本轮动态点赞/评论、群里冒泡 ──
+        if (world.npcs.length > 0) {
+            try {
+                // 喂这一轮角色刚发的动态，让 NPC + 路人当轮就点赞评论
+                const recentPostsForNpc = beats.flatMap(b =>
+                    (b.phone?.posts || []).map((post, idx) => ({ ref: `${round}_${b.charId}_${idx}`, name: b.charName, post }))
+                ).slice(0, 12);
+                const npcData = await safeFetchJson(`${baseUrl}/chat/completions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${api.apiKey || 'sk-none'}` },
+                    body: JSON.stringify({
+                        model: api.model,
+                        messages: [{ role: 'user', content: buildNpcTurn({ world, members, storyTime, lastSummary, chapterAtmosphere: latestChapter?.atmosphere, inboxes: npcInboxes(world), recentPosts: recentPostsForNpc }) }],
+                        temperature: 0.9, stream: false,
+                    }),
+                }, 2, 0, { appName: '家园', purpose: `NPC世界引擎 · ${world.name}` });
+                const parsed = parseNpcScene(npcData.choices?.[0]?.message?.content || '');
+                npcScene = parsed.scene || undefined;
+                npcHooks = parsed.hooks;
+                // 群聊冒泡 + 回复成员私信（落线程，角色下一轮接住）
+                applyNpcGroupLines(world, parsed.groupLines, round, storyTime);
+                applyNpcDms(world, parsed.dms, members, round, storyTime);
+                // 动态的点赞/评论（NPC + 路人）回填
+                if (parsed.feedReactions.length > 0) {
+                    world.feedReactions = { ...(world.feedReactions || {}) };
+                    for (const r of parsed.feedReactions) world.feedReactions[r.ref] = { likes: r.likes, comments: r.comments };
+                }
+            } catch (e) {
+                console.warn('[WorldHome] NPC engine failed:', e);
+            }
+            dispatch('world-beat-done', { worldId: world.id, stage: 'npc', done: members.length, total: members.length });
+        }
 
         // ── 3. 落库：episode + 关系回填 + 剧情时钟推进 ──
         const episode: WorldEpisode = {
