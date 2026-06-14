@@ -84,10 +84,12 @@ export function applyRelationshipDeltas(world: WorldProfile, beats: WorldCharBea
             if (!otherId || otherId === beat.charId) continue;
             let rel = world.relationships.find(r => r.fromId === beat.charId && r.toId === otherId);
             if (!rel) {
-                rel = { fromId: beat.charId, toId: otherId, value: 50 };
+                // 没记录的边按「陌生中立」0 起步（不是凭空友善）
+                rel = { fromId: beat.charId, toId: otherId, value: 0 };
                 world.relationships.push(rel);
             }
-            rel.value = Math.max(0, Math.min(100, rel.value + rd.delta));
+            // 好感范围 -100 ~ +100（可为负 = 嫌隙/敌意）
+            rel.value = Math.max(-100, Math.min(100, rel.value + rd.delta));
         }
     }
 }

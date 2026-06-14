@@ -44,25 +44,33 @@ export function narrativeStyleGuide(world: WorldProfile): string {
     return NARRATIVE_STYLES[key]?.guide || NARRATIVE_STYLES.warm.guide;
 }
 
-/** 剧情时钟 → 时间标签。一轮推进半天：偶数=白天，奇数=夜晚。 */
+/** 一天分三段：早/中/晚。一轮推进一段。 */
+export const SEGMENTS_PER_DAY = 3;
+const SEGMENT_LABELS = ['早上', '中午', '晚上'];
+/** 该段是否算夜晚（用于昼夜视觉） */
+export function isNightClock(storyClock: number): boolean {
+    return ((storyClock % SEGMENTS_PER_DAY) + SEGMENTS_PER_DAY) % SEGMENTS_PER_DAY === 2;
+}
+
+/** 剧情时钟 → 时间标签。一轮推进一段：0=早上 1=中午 2=晚上。 */
 export function storyTimeLabel(storyClock: number): string {
-    return `第${Math.floor(storyClock / 2) + 1}天${storyClock % 2 === 0 ? '白天' : '夜晚'}`;
+    return `第${Math.floor(storyClock / SEGMENTS_PER_DAY) + 1}天${SEGMENT_LABELS[storyClock % SEGMENTS_PER_DAY]}`;
 }
 
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
 /**
  * 时间模式感知的时间标签：
- *   - real（默认）：沿用「第N天 白天/夜晚」。
- *   - sim：从 simStartDate 起按半天推进，输出真实日历日期「YYYY年M月D日 周X 白天/夜晚」。
+ *   - real（默认）：沿用「第N天 早上/中午/晚上」。
+ *   - sim：从 simStartDate 起按天推进，输出真实日历日期「YYYY年M月D日 周X 早上/中午/晚上」。
  */
 export function worldTimeLabel(world: WorldProfile, storyClock: number = world.storyClock): string {
     if (world.timeMode === 'sim' && world.simStartDate) {
         const { year, month, day } = world.simStartDate;
         const d = new Date(year, month - 1, day);
-        d.setDate(d.getDate() + Math.floor(storyClock / 2));
+        d.setDate(d.getDate() + Math.floor(storyClock / SEGMENTS_PER_DAY));
         const wd = WEEKDAYS[d.getDay()];
-        return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${wd} ${storyClock % 2 === 0 ? '白天' : '夜晚'}`;
+        return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${wd} ${SEGMENT_LABELS[storyClock % SEGMENTS_PER_DAY]}`;
     }
     return storyTimeLabel(storyClock);
 }
@@ -115,25 +123,40 @@ function describeHousing(world: WorldProfile, members: CharacterProfile[]): stri
     return lines.join('\n');
 }
 
-const relTone = (v: number) => v >= 80 ? '非常亲近' : v >= 60 ? '关系不错' : v >= 40 ? '一般' : v >= 20 ? '有些疏远' : '关系紧张';
+/** 好感档位（-100 ~ +100，0=陌生中立）。 */
+const relTone = (v: number) =>
+    v >= 75 ? '亲密无间' : v >= 45 ? '关系很好' : v >= 20 ? '有好感' :
+    v > -20 ? '中立客套' : v > -45 ? '有嫌隙' : v > -75 ? '敌意' : '深恶痛绝';
+
+/** 该好感档位对应的行为基调（喂给角色，让好感真的左右言行）。 */
+const relBehavior = (v: number) =>
+    v >= 75 ? '你打心底信任ta、愿意为ta让步，相处自然亲密。' :
+    v >= 45 ? '你乐意主动接近ta、把ta的事放在心上。' :
+    v >= 20 ? '你对ta有好感，相处舒服，但还没到掏心掏肺。' :
+    v > -20 ? '你和ta只是泛泛之交/还不熟——客气、有分寸、保持距离，别表现得自来熟或格外热络。' :
+    v > -45 ? '你看ta有点不顺眼，相处会下意识防备、冷淡或带点刺，不会主动示好。' :
+    v > -75 ? '你对ta有明显敌意，能不打交道就不打交道，开口多半是冲突。' :
+    '你厌恶ta到骨子里，几乎无法心平气和地共处。';
 
 /**
  * 与某角色相关的关系条文本。关系是**有向**的（你对ta ≠ ta对你）：
- *   - 你→别人：给精确的关系名 + 数值（这是你自己的内心，你当然清楚）
- *   - 别人→你：只给粗粒度的"你能感觉到的态度"——对方心里的定位和具体程度是对方的
- *     内心戏，给了数值就等于替这个角色开了上帝视角
+ *   - 你→别人：给关系名 + 好感档位 + 数值 + 行为基调（这是你自己的内心，你当然清楚）
+ *   - 别人→你：只给粗粒度的"你能感觉到的态度"——对方心里的定位和具体程度是对方的内心戏
  *   - 他人之间的关系一概不给
+ *
+ * 好感（潜意识的亲疏拉扯）与 label（你理智上给这段关系贴的标签）可以完全冲突——
+ * 嘴上说讨厌、心里却越来越在意；或称兄道弟、好感却在悄悄下滑。冲突时按真实人性演。
  */
 function describeRelationsFor(world: WorldProfile, charId: string, members: CharacterProfile[], npcNames: Map<string, string>): string {
     const nameOf = (id: string) => members.find(m => m.id === id)?.name || npcNames.get(id) || '';
     const outgoing = world.relationships.filter(r => r.fromId === charId);
     const incoming = world.relationships.filter(r => r.toId === charId);
-    if (outgoing.length === 0 && incoming.length === 0) return '（还没有建立明确的关系记录，凭你对他们的记忆与第一印象相处）';
+    if (outgoing.length === 0 && incoming.length === 0) return '（还没有建立明确的关系记录，把彼此当作刚认识的陌生人，凭第一印象保持分寸地相处）';
     const lines: string[] = [];
     for (const r of outgoing) {
         const other = nameOf(r.toId);
         if (!other) continue;
-        lines.push(`- 你对 ${other}：${r.label ? `${r.label}，` : ''}${relTone(r.value)}（${r.value}/100）`);
+        lines.push(`- 你对 ${other}：${r.label ? `理智上你称之为「${r.label}」；` : ''}好感 ${r.value}（${relTone(r.value)}）——${relBehavior(r.value)}`);
     }
     for (const r of incoming) {
         const other = nameOf(r.fromId);
@@ -279,19 +302,20 @@ ${groupSection}
   "statusPanel": { "体力": 0到100的数字, "心情值": 0到100的数字, "其他你想记录的状态": "自由发挥（最多再加2项）" },
   "dialogues": [{ "with": "在场成员的名字", "lines": ["你当面对ta说的话（ta会完整听到）"] }],
   "phone": {
-    "posts": ["发的社交媒体动态（0~2条，公开，所有人可见）"],
+    "posts": ["这一段发的社交媒体动态（尽量发 1 条，记录此刻的心情/见闻/吐槽/晒图文案；除非你确实没心情发，否则别空着）"],
     "dms": [{ "to": "成员名", "lines": ["私聊消息，像真人在手机上打字——可以连发好几条短的、聊得来回多一点"] }],
     "group": ["发到世界群聊的话（0~4条）"]
   },
-  "relationships": [{ "with": "成员名", "delta": -5到5的整数, "reason": "为什么" }]
+  "relationships": [{ "with": "成员名", "delta": -4到4的整数, "reason": "为什么" }]
 }
 规则：
-- timeline 给 3~6 条，时间要符合${storyTime.includes('夜') ? '傍晚到深夜' : '清晨到午后'}；**shared=false 表示这段你想瞒着**（别人看不到，但可能成为伏笔）。
+- timeline 给 3~6 条，时间要符合${storyTime.includes('早') ? '清晨到上午' : storyTime.includes('中午') ? '午间到下午' : '傍晚到深夜'}；**shared=false 表示这段你想瞒着**（别人看不到，但可能成为伏笔）。
 - 信息可见性：动态=公开；timeline(shared=true)=别人能知道；私聊=仅对方；群聊=全员；narrative 和 memo=完全私人。瞒事就让对应 timeline 条目 shared=false 并写进 secrets。
 - ${world.mode === 'heavy' ? `这个世界里不存在 ${userName || '用户'}，所有字段都绝不出现 ta。` : world.mode === 'light' ? `${userName || '用户'} 是你心里最重要的人，但此刻不在场——可以在 narrative、memo 或动态里自然流露惦记。` : `${userName || '用户'} 只是世界里的普通一员，不必特意提及。`}
 - 手机里标【刚刚】的消息该回就回（phone.dms / phone.group），已读不回也行，但要符合你的性格；鼓励聊得丰富些。
 - dialogues 只在你的 timeline 和对方真的有共处时才用；不在一起就用手机，或者互相挂念/冷战都行——聚焦你自己。
-- relationships 只在真的发生了影响关系的事时才给。`;
+- **好感真的会左右你的言行**：严格按上面「你的关系」里每个人的好感档位与行为基调来相处——低好感/负好感时别自来熟、别无缘无故友善；中立的人就保持客气的距离感。
+- relationships(delta) 要克制、来之不易：日常小事 ±1~2，只有真正触动你的大事才到 ±3~4；好感是慢慢攒起来、也可能因一件事崩掉的，**绝不会一两轮就突飞猛进**。好感和你嘴上/理智上对这段关系的定位可以完全相反，按真实人性演（口嫌体正 / 面和心不和都行）。只在真的发生了影响关系的事时才给。`;
 }
 
 /**
@@ -434,8 +458,11 @@ export function parseCharBeat(raw: string, char: CharacterProfile, memberNames: 
             .filter((d: any) => d.lines.length > 0)
             .slice(0, 4)
         : [];
-    const posts = Array.isArray(j.phone?.posts) ? j.phone.posts.map((p: any) => String(p).slice(0, 300)).filter(Boolean).slice(0, 2) : [];
-    const group = Array.isArray(j.phone?.group) ? j.phone.group.map((l: any) => String(l).slice(0, 200)).filter(Boolean).slice(0, 3) : [];
+    // 兼容模型把 posts/group 放在 phone 下或直接放在根上两种写法
+    const rawPosts = Array.isArray(j.phone?.posts) ? j.phone.posts : Array.isArray(j.posts) ? j.posts : [];
+    const posts = rawPosts.map((p: any) => String(p).slice(0, 300)).filter(Boolean).slice(0, 2);
+    const rawGroup = Array.isArray(j.phone?.group) ? j.phone.group : Array.isArray(j.group) ? j.group : [];
+    const group = rawGroup.map((l: any) => String(l).slice(0, 200)).filter(Boolean).slice(0, 3);
     const dialogues = Array.isArray(j.dialogues)
         ? j.dialogues
             .filter((d: any) => d && typeof d.with === 'string' && nameSet.has(d.with) && Array.isArray(d.lines))
@@ -446,7 +473,7 @@ export function parseCharBeat(raw: string, char: CharacterProfile, memberNames: 
     const relationshipDeltas = Array.isArray(j.relationships)
         ? j.relationships
             .filter((r: any) => r && typeof r.with === 'string' && nameSet.has(r.with))
-            .map((r: any) => ({ withName: r.with, delta: clampNum(r.delta, -5, 5, 0), reason: r.reason ? String(r.reason).slice(0, 100) : undefined }))
+            .map((r: any) => ({ withName: r.with, delta: clampNum(r.delta, -4, 4, 0), reason: r.reason ? String(r.reason).slice(0, 100) : undefined }))
             .slice(0, 5)
         : [];
     const timeline = Array.isArray(j.timeline)

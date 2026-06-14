@@ -15,24 +15,25 @@ const mkWorld = (overrides: Partial<WorldProfile> = {}): WorldProfile => ({
 });
 
 describe('worldTimeLabel（时间模式感知）', () => {
-    it('real 模式沿用「第N天 白天/夜晚」', () => {
-        expect(worldTimeLabel(mkWorld({ timeMode: 'real', storyClock: 0 }))).toBe('第1天白天');
-        expect(worldTimeLabel(mkWorld({ timeMode: 'real', storyClock: 3 }))).toBe('第2天夜晚');
+    it('real 模式沿用「第N天 早/中/晚」', () => {
+        expect(worldTimeLabel(mkWorld({ timeMode: 'real', storyClock: 0 }))).toBe('第1天早上');
+        expect(worldTimeLabel(mkWorld({ timeMode: 'real', storyClock: 3 }))).toBe('第2天早上');
+        expect(worldTimeLabel(mkWorld({ timeMode: 'real', storyClock: 5 }))).toBe('第2天晚上');
     });
     it('未设 timeMode 的旧世界按 real', () => {
-        expect(worldTimeLabel(mkWorld({ storyClock: 2 }))).toBe('第2天白天');
+        expect(worldTimeLabel(mkWorld({ storyClock: 2 }))).toBe('第1天晚上');
     });
-    it('sim 模式从起始日期按半天推进为真实日历日期', () => {
+    it('sim 模式从起始日期按「天」推进（一天三段）为真实日历日期', () => {
         const w = mkWorld({ timeMode: 'sim', simStartDate: { year: 2024, month: 3, day: 1 } });
         expect(worldTimeLabel(w, 0)).toContain('2024年3月1日');
-        expect(worldTimeLabel(w, 0)).toContain('白天');
-        expect(worldTimeLabel(w, 1)).toContain('2024年3月1日'); // 同一天的夜晚
-        expect(worldTimeLabel(w, 1)).toContain('夜晚');
-        expect(worldTimeLabel(w, 2)).toContain('2024年3月2日'); // 第二天
+        expect(worldTimeLabel(w, 0)).toContain('早上');
+        expect(worldTimeLabel(w, 2)).toContain('2024年3月1日'); // 同一天的晚上
+        expect(worldTimeLabel(w, 2)).toContain('晚上');
+        expect(worldTimeLabel(w, 3)).toContain('2024年3月2日'); // 满三段进第二天
     });
     it('sim 模式跨月进位正确', () => {
         const w = mkWorld({ timeMode: 'sim', simStartDate: { year: 2024, month: 1, day: 31 } });
-        expect(worldTimeLabel(w, 2)).toContain('2024年2月1日');
+        expect(worldTimeLabel(w, 3)).toContain('2024年2月1日');
     });
 });
 

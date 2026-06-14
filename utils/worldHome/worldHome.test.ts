@@ -20,11 +20,12 @@ const mkWorld = (overrides: Partial<WorldProfile> = {}): WorldProfile => ({
 });
 
 describe('storyTimeLabel', () => {
-    it('半天为单位推进：偶数白天，奇数夜晚', () => {
-        expect(storyTimeLabel(0)).toBe('第1天白天');
-        expect(storyTimeLabel(1)).toBe('第1天夜晚');
-        expect(storyTimeLabel(2)).toBe('第2天白天');
-        expect(storyTimeLabel(5)).toBe('第3天夜晚');
+    it('一天三段推进：早上/中午/晚上', () => {
+        expect(storyTimeLabel(0)).toBe('第1天早上');
+        expect(storyTimeLabel(1)).toBe('第1天中午');
+        expect(storyTimeLabel(2)).toBe('第1天晚上');
+        expect(storyTimeLabel(3)).toBe('第2天早上');
+        expect(storyTimeLabel(5)).toBe('第2天晚上');
     });
 });
 
@@ -105,7 +106,7 @@ describe('parseCharBeat', () => {
         expect(beat.phone?.group).toEqual(['今天谁做饭']);
     });
 
-    it('过滤非成员的私聊对象与关系对象，delta 截断到 ±5', () => {
+    it('过滤非成员的私聊对象与关系对象，delta 截断到 ±4', () => {
         const raw = JSON.stringify({
             location: '镇上', narrative: 'x', mood: 'y',
             phone: { dms: [{ to: '陌生人', lines: ['?'] }, { to: '阿岚', lines: ['在吗'] }] },
@@ -114,7 +115,7 @@ describe('parseCharBeat', () => {
         const beat = parseCharBeat(raw, char, members);
         expect(beat.phone?.dms).toHaveLength(1);
         expect(beat.relationshipDeltas).toHaveLength(1);
-        expect(beat.relationshipDeltas?.[0].delta).toBe(5);
+        expect(beat.relationshipDeltas?.[0].delta).toBe(4);
     });
 });
 
@@ -266,9 +267,11 @@ describe('buildWorldCharTurn', () => {
         });
         const members = [mkChar('a', '小满'), mkChar('b', '阿岚')];
         const turn = buildWorldCharTurn({ world, char: members[0], members, storyTime: '第1天白天', round: 1, beatsSoFar: [], userName: '' });
-        expect(turn).toContain('你对 阿岚：单恋，非常亲近（85/100）');
-        expect(turn).toContain('你能隐约感觉到 阿岚 对你的态度：有些疏远');
-        expect(turn).not.toContain('30/100');     // 对方的数值是对方的内心
+        expect(turn).toContain('你对 阿岚');
+        expect(turn).toContain('「单恋」');        // 理智上的标签
+        expect(turn).toContain('好感 85（亲密无间）'); // 自己的好感数值 + 档位
+        expect(turn).toContain('你能隐约感觉到 阿岚 对你的态度：有好感'); // 对方 30 → 有好感（只给档位）
+        expect(turn).not.toContain('好感 30');    // 对方的数值是对方的内心，不泄露
         expect(turn).not.toContain('普通同事');   // 对方眼中的关系名同理
     });
 
@@ -335,14 +338,14 @@ describe('applyRelationshipDeltas（有向回填）', () => {
         expect(world.relationships.find(r => r.fromId === 'b' && r.toId === 'a')!.value).toBe(20);
     });
 
-    it('不存在的边按 50 起步，且数值钳在 0-100', () => {
+    it('不存在的边按 0（陌生中立）起步，数值钳在 -100~100（可为负）', () => {
         const world = mkWorld({ relationships: [{ fromId: 'a', toId: 'b', value: 99 }] });
         applyRelationshipDeltas(world, [
-            { charId: 'a', charName: '小满', location: 'x', narrative: 'y', mood: 'z', relationshipDeltas: [{ withName: '阿岚', delta: 5 }] },
+            { charId: 'a', charName: '小满', location: 'x', narrative: 'y', mood: 'z', relationshipDeltas: [{ withName: '阿岚', delta: 4 }] },
             { charId: 'b', charName: '阿岚', location: 'x', narrative: 'y', mood: 'z', relationshipDeltas: [{ withName: '小满', delta: -4 }] },
         ], members);
-        expect(world.relationships.find(r => r.fromId === 'a' && r.toId === 'b')!.value).toBe(100);
-        expect(world.relationships.find(r => r.fromId === 'b' && r.toId === 'a')!.value).toBe(46);
+        expect(world.relationships.find(r => r.fromId === 'a' && r.toId === 'b')!.value).toBe(100); // 99+4 钳到 100
+        expect(world.relationships.find(r => r.fromId === 'b' && r.toId === 'a')!.value).toBe(-4);  // 新边 0 起步 −4 → 负数
     });
 });
 

@@ -24,7 +24,7 @@ import { DB } from '../utils/db';
 import { getChibi } from '../utils/vrWorld/chibi';
 import { WorldScheduler } from '../utils/worldHome/scheduler';
 import { isWorldRunning } from '../utils/worldHome/engine';
-import { worldTimeLabel, houseOf, NARRATIVE_STYLES, buildNpcRollPrompt, parseRolledNpcs } from '../utils/worldHome/prompts';
+import { worldTimeLabel, isNightClock, houseOf, NARRATIVE_STYLES, buildNpcRollPrompt, parseRolledNpcs } from '../utils/worldHome/prompts';
 import { SIM_CHAPTER_DAYS, SIM_CHAPTER_CLOCKS } from '../utils/worldHome/chapters';
 import { dmThreadsOf, groupThreadOf } from '../utils/worldHome/threads';
 import { safeFetchJson } from '../utils/safeApi';
@@ -259,7 +259,7 @@ const PhoneModal: React.FC<{
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
             <div className="relative" onClick={e => e.stopPropagation()}>
                 {/* 手机壳 */}
-                <div className="w-[280px] h-[572px] rounded-[2.6rem] bg-gradient-to-b from-zinc-800 to-zinc-950 p-[7px] shadow-[0_24px_60px_rgba(0,0,0,.6),inset_0_1px_1px_rgba(255,255,255,.18)]">
+                <div className="w-[min(360px,92vw)] h-[min(760px,86vh)] rounded-[2.6rem] bg-gradient-to-b from-zinc-800 to-zinc-950 p-[7px] shadow-[0_24px_60px_rgba(0,0,0,.6),inset_0_1px_1px_rgba(255,255,255,.18)]">
                     <div className="relative w-full h-full rounded-[2.15rem] overflow-hidden flex flex-col" style={{ background: 'linear-gradient(170deg,#101426 0%,#1b2138 60%,#232a47 100%)' }}>
                         {/* 灵动岛 */}
                         <div className="absolute top-2 left-1/2 -translate-x-1/2 w-20 h-[18px] rounded-full bg-black z-20" />
@@ -475,7 +475,7 @@ const WorldEditor: React.FC<{
         if (existing) {
             upd({ relationships: w.relationships.map(r => (r.fromId === fromId && r.toId === toId) ? { ...r, ...updates } : r) });
         } else {
-            upd({ relationships: [...w.relationships, { fromId, toId, value: 50, ...updates }] });
+            upd({ relationships: [...w.relationships, { fromId, toId, value: 0, ...updates }] });
         }
     };
 
@@ -675,9 +675,9 @@ const WorldEditor: React.FC<{
                                             <span className="text-[12px] font-bold text-stone-700 shrink-0">{fromName} → {toName}</span>
                                             <input className="flex-1 min-w-0 px-2 py-0.5 rounded-lg bg-stone-50 border border-stone-100 text-[11px]" placeholder={`${fromName} 眼中的关系（挚友/单恋/死对头…）`}
                                                 value={rel?.label || ''} onChange={e => updRel(fromId, toId, { label: e.target.value })} />
-                                            <span className="text-[11px] text-amber-700 font-bold w-7 text-right">{rel?.value ?? 50}</span>
+                                            <span className={`text-[11px] font-bold w-8 text-right ${(rel?.value ?? 0) < 0 ? 'text-rose-600' : 'text-amber-700'}`}>{rel?.value ?? 0}</span>
                                         </div>
-                                        <input type="range" min={0} max={100} value={rel?.value ?? 50} className="w-full accent-amber-500"
+                                        <input type="range" min={-100} max={100} value={rel?.value ?? 0} className="w-full accent-amber-500"
                                             onChange={e => updRel(fromId, toId, { value: parseInt(e.target.value, 10) })} />
                                     </div>
                                 );
@@ -922,13 +922,13 @@ const WorldView: React.FC<{
 
     const members = useMemo(() => world.memberIds.map(id => characters.find(c => c.id === id)).filter(Boolean) as CharacterProfile[], [world.memberIds, characters]);
     const latest = episodes[0];
-    // 氛围跟随"即将到来的半天"：偶数=白天，奇数=夜晚
-    const isNight = world.storyClock % 2 === 1;
+    // 氛围跟随"即将到来的那一段"：早/中=白天，晚=夜晚
+    const isNight = isNightClock(world.storyClock);
 
     // sim（模拟时间）：章节进度 + 已结的卷
     const isSim = world.timeMode === 'sim';
     const chapters = useMemo(() => (world.chapters || []).slice().sort((a, b) => b.index - a.index), [world.chapters]);
-    const daysIntoChapter = Math.floor((world.storyClock - (world.simSummarizedClock || 0)) / 2);
+    const daysIntoChapter = Math.floor((world.storyClock - (world.simSummarizedClock || 0)) / 3);
     const daysToNextChapter = Math.max(0, SIM_CHAPTER_DAYS - daysIntoChapter);
 
     const loadEpisodes = useCallback(async () => {
@@ -965,7 +965,7 @@ const WorldView: React.FC<{
         if (members.length === 0) { addToast('这个世界还没有住进角色', 'error'); return; }
         setProgress({ done: 0, total: members.length });
         WorldScheduler.triggerNow(world.id);
-        addToast('观测开始——世界推进半天，可以先去做别的', 'success');
+        addToast('观测开始——世界推进一段（早/中/晚），可以先去做别的', 'success');
     };
 
     // 拜访视图的住房编排：配置的小屋 + 没分配的成员各自独居
@@ -1070,7 +1070,7 @@ const WorldView: React.FC<{
                         <button onClick={observe} disabled={!!progress}
                             className="relative overflow-hidden wh-sheen shrink-0 px-4 py-2.5 rounded-2xl text-[12.5px] font-black tracking-wide text-amber-950 shadow-[0_6px_18px_rgba(255,180,60,.45)] disabled:opacity-60 active:scale-95 transition-transform"
                             style={{ background: 'linear-gradient(135deg,#ffd76e 0%,#ffb347 100%)' }}>
-                            <span className="relative z-10 flex items-center gap-1.5"><Sparkle size={15} weight="fill" />{progress ? '演绎中…' : '观测 · 推进半天'}</span>
+                            <span className="relative z-10 flex items-center gap-1.5"><Sparkle size={15} weight="fill" />{progress ? '演绎中…' : '观测 · 推进一段'}</span>
                         </button>
                     </div>
                     {progress && (
@@ -1231,10 +1231,15 @@ const WorldView: React.FC<{
                                                         {nameOf(r!.fromId)} <CaretRight size={9} weight="bold" className="opacity-50" /> {nameOf(r!.toId)}
                                                         {r!.label && <span className="text-[8.5px] font-black px-1.5 py-px rounded-full bg-rose-400/15 text-rose-500 border border-rose-400/25">{r!.label}</span>}
                                                     </span>
-                                                    <span className="font-black flex items-center gap-0.5 text-rose-400"><Heart size={10} weight="fill" />{r!.value}</span>
+                                                    <span className={`font-black flex items-center gap-0.5 ${r!.value < 0 ? 'text-slate-400' : 'text-rose-400'}`}><Heart size={10} weight="fill" />{r!.value}</span>
                                                 </div>
-                                                <div className={`h-1.5 rounded-full overflow-hidden mt-1 ${t.barTrack}`}>
-                                                    <div className="h-full rounded-full transition-all" style={{ width: `${r!.value}%`, background: 'linear-gradient(90deg,#fb7185,#fbbf24)' }} />
+                                                {/* 好感 -100~100：中点为 0，向右暖色=好感、向左冷色=负好感 */}
+                                                <div className={`relative h-1.5 rounded-full overflow-hidden mt-1 ${t.barTrack}`}>
+                                                    <div className="absolute top-0 bottom-0 left-1/2 w-px bg-black/20" />
+                                                    <div className="absolute top-0 bottom-0 rounded-full transition-all"
+                                                        style={r!.value >= 0
+                                                            ? { left: '50%', width: `${(r!.value / 2)}%`, background: 'linear-gradient(90deg,#fb7185,#fbbf24)' }
+                                                            : { right: '50%', width: `${(-r!.value / 2)}%`, background: 'linear-gradient(90deg,#64748b,#94a3b8)' }} />
                                                 </div>
                                             </div>
                                         ))}
@@ -1380,7 +1385,7 @@ const WorldView: React.FC<{
 // ============================================================
 // 主组件
 // ============================================================
-const WorldHomeApp: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
+const WorldHomeApp: React.FC<{ embedded?: boolean; onFullscreen?: (full: boolean) => void }> = ({ embedded, onFullscreen }) => {
     const { closeApp, characters, addToast, apiConfig, apiPresets } = useOS();
     const [worlds, setWorlds] = useState<WorldProfile[]>([]);
     const [view, setView] = useState<'list' | 'edit' | 'world'>('list');
@@ -1393,6 +1398,8 @@ const WorldHomeApp: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
 
     const reload = useCallback(async () => { setWorlds(await DB.getWorlds()); }, []);
     useEffect(() => { reload(); }, [reload]);
+    // 内嵌进「小小窝」时：开始玩（进世界/编辑）就让外层隐去三栏，回列表恢复
+    useEffect(() => { if (embedded) onFullscreen?.(view !== 'list'); }, [embedded, view, onFullscreen]);
 
     const active = worlds.find(w => w.id === activeId) || null;
 
@@ -1440,7 +1447,7 @@ const WorldHomeApp: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
     };
 
     // 世界视图的顶栏要压在深色页底上，配色跟着走
-    const worldNight = view === 'world' && active ? active.storyClock % 2 === 1 : false;
+    const worldNight = view === 'world' && active ? isNightClock(active.storyClock) : false;
     const darkHeader = view === 'world' && worldNight;
     const headerBg = view === 'world'
         ? (worldNight ? '#11142a' : '#cfe7da')
@@ -1495,7 +1502,7 @@ const WorldHomeApp: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
                             <div className="text-[26px] font-black text-white font-serif tracking-[0.18em] mt-1" style={{ textShadow: '0 2px 14px rgba(255,200,100,.25)' }}>家　园</div>
                             <p className="text-[10.5px] leading-[1.7] text-indigo-100/70 mt-2">
                                 把同一世界观的角色放进一个世界，让他们在你不看的时候慢慢生活。
-                                每次<b className="text-amber-200">观测</b>，世界推进半天——每个角色独立演绎，绝不上帝视角；
+                                每次<b className="text-amber-200">观测</b>，世界推进一段（早/中/晚）——每个角色独立演绎，绝不上帝视角；
                                 NPC 由世界引擎一口气演完。所有故事都会写回各自的聊天与记忆。
                             </p>
                         </div>
@@ -1503,7 +1510,7 @@ const WorldHomeApp: React.FC<{ embedded?: boolean }> = ({ embedded }) => {
 
                     {worlds.map(w => {
                         const ms = w.memberIds.map(id => characters.find(c => c.id === id)).filter(Boolean) as CharacterProfile[];
-                        const night = w.storyClock % 2 === 1;
+                        const night = isNightClock(w.storyClock);
                         return (
                             <button key={w.id} onClick={() => { setActiveId(w.id); setView('world'); }}
                                 className="w-full rounded-2xl overflow-hidden text-left shadow-[0_4px_16px_rgba(60,50,30,.12)] active:scale-[0.99] transition-transform border border-white/60">

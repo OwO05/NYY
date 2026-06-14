@@ -16,10 +16,10 @@ import type { APIConfig, CharacterProfile, WorldProfile, WorldEpisode, WorldChap
 import { safeFetchJson } from '../safeApi';
 import { extractJson } from './prompts';
 
-/** 一天两个半天，20 天结一卷。 */
-export const HALF_DAYS_PER_DAY = 2;
+/** 一天三段（早/中/晚），20 天结一卷。 */
+export const SEGMENTS_PER_DAY = 3;
 export const SIM_CHAPTER_DAYS = 20;
-export const SIM_CHAPTER_CLOCKS = SIM_CHAPTER_DAYS * HALF_DAYS_PER_DAY; // 40
+export const SIM_CHAPTER_CLOCKS = SIM_CHAPTER_DAYS * SEGMENTS_PER_DAY; // 60
 
 const genId = (p: string) => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 
