@@ -61,6 +61,14 @@ const sanitizeAssistantOutput = (raw: string) => {
     .replace(/^\s*时间戳[:：].*$/gim, '')
     .trim();
 };
+const CALL_WAVE = [10, 18, 26, 14, 30, 12, 22, 32, 16, 24, 12, 28, 18, 10, 26, 20, 14, 30, 12, 22];
+const CALL_SPARKLES = [
+  { top: '14%', left: '16%', s: 3 }, { top: '22%', left: '82%', s: 2 },
+  { top: '40%', left: '10%', s: 2 }, { top: '58%', left: '88%', s: 3 },
+  { top: '70%', left: '20%', s: 2 }, { top: '34%', left: '70%', s: 2 },
+  { top: '48%', left: '54%', s: 2 }, { top: '12%', left: '58%', s: 2 },
+  { top: '78%', left: '64%', s: 3 }, { top: '64%', left: '38%', s: 2 },
+];
 const VOICE_LANG_OPTIONS = [
   { value: '', label: '默认' },
   { value: 'en', label: 'English' },
@@ -233,18 +241,6 @@ const buildCallPrompt = (userName: string, charName?: string, coreContext?: stri
 - 每条消息只有一个 <语音> 标签，emotion 属性可选；情绪不强就别加
 - 中文部分和 <语音> 部分表达的意思要一致` : '';
   return [coreContext, timeContext, callPrompt, voiceLangPrompt].filter(Boolean).join('\n\n');
-};
-const getCallStateStyles = (state: CallState) => {
-  const map: Record<CallState, { label: string; textClass: string; ringClass: string; waveClass: string }> = {
-    idle: { label: '等待中', textClass: 'text-slate-200', ringClass: 'ring-slate-300/35', waveClass: 'bg-slate-300/20' },
-    connecting: { label: '接通中……', textClass: 'text-indigo-200', ringClass: 'ring-indigo-300/40', waveClass: 'bg-indigo-300/25' },
-    listening: { label: '在听', textClass: 'text-cyan-200', ringClass: 'ring-cyan-300/40', waveClass: 'bg-cyan-200/25' },
-    thinking: { label: '在想……', textClass: 'text-amber-200', ringClass: 'ring-amber-300/40', waveClass: 'bg-amber-200/25' },
-    speaking: { label: '在说', textClass: 'text-violet-200', ringClass: 'ring-violet-300/40', waveClass: 'bg-violet-200/30' },
-    ended: { label: '已挂断', textClass: 'text-rose-200', ringClass: 'ring-rose-300/35', waveClass: 'bg-rose-200/25' },
-    error: { label: '断了', textClass: 'text-rose-200', ringClass: 'ring-rose-300/40', waveClass: 'bg-rose-200/30' },
-  };
-  return map[state];
 };
 const CallApp: React.FC = () => {
   const { closeApp, characters, activeCharacterId, addToast, apiConfig, userProfile, customThemes, suspendCall, suspendedCall, clearSuspendedCall } = useOS();
@@ -797,7 +793,6 @@ const CallApp: React.FC = () => {
   };
   const sendingBusy = ['connecting', 'thinking'].includes(callState);
   const displayCallState: CallState = isAudioPlaying ? 'speaking' : callState;
-  const callStateStyles = getCallStateStyles(displayCallState);
   const latestAssistantAudio = [...bubbles].reverse().find(b => b.role === 'assistant' && b.audioUrl)?.audioUrl;
   useEffect(() => {
     loadCallRecords(selectedCharId);
@@ -1044,55 +1039,103 @@ const CallApp: React.FC = () => {
       </div>
     );
   }
+  const waveActive = displayCallState === 'speaking' || displayCallState === 'thinking';
+  const connSub = callState === 'connecting' ? '正在建立加密通讯…'
+    : callState === 'error' ? '通讯出现波动'
+    : '通讯连接稳定';
+  const analyzeLabel = displayCallState === 'speaking' ? { cn: '说话中', en: 'SPEAKING' }
+    : displayCallState === 'thinking' ? { cn: '思考中', en: 'VOICE ANALYZING' }
+    : displayCallState === 'connecting' ? { cn: '接通中', en: 'CONNECTING' }
+    : displayCallState === 'error' ? { cn: '连接异常', en: 'SIGNAL ERROR' }
+    : { cn: '聆听中', en: 'LISTENING' };
   return (
-    <div className="h-full w-full relative bg-slate-950 text-white flex flex-col overflow-hidden">
+    <div className="h-full w-full relative bg-[#0a0613] text-white flex flex-col overflow-hidden">
+      {/* blurred character art */}
       <div
-        className="absolute inset-0 bg-cover bg-center scale-125 blur-2xl opacity-35"
+        className="absolute inset-0 bg-cover bg-center scale-125 blur-3xl opacity-30"
         style={{ backgroundImage: selectedChar?.avatar ? `url(${selectedChar.avatar})` : undefined }}
       />
-      <div className="absolute inset-0 bg-gradient-to-b from-black/45 via-slate-950/70 to-black/85" />
-      <div className="relative z-10 flex flex-col h-full">
-      <div className="px-4 pt-10 pb-3 border-b border-white/10 flex items-center justify-between">
-        <button onClick={handleHangup} className="text-sm text-slate-400">挂断</button>
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs" style={{ backgroundColor: `${accentColor}50` }}>{selectedChar?.avatar ? <img src={selectedChar.avatar} alt="" className="w-full h-full rounded-full object-cover" /> : (selectedChar?.name?.[0] || '角')}</div>
-          <div className="text-sm">{selectedChar?.name || '未选择角色'}</div>
-        </div>
-        <div className="text-sm tabular-nums">{formatDuration(elapsedSeconds)}</div>
+      {/* accent aura glows */}
+      <div className="absolute -top-28 left-1/2 -translate-x-1/2 w-[130%] h-72 rounded-full blur-3xl opacity-40 pointer-events-none"
+        style={{ background: `radial-gradient(closest-side, ${accentColor}, transparent)` }} />
+      <div className="absolute -bottom-20 left-1/2 -translate-x-1/2 w-[150%] h-80 rounded-full blur-3xl opacity-25 pointer-events-none"
+        style={{ background: `radial-gradient(closest-side, ${accentColor}, transparent)` }} />
+      {/* vignette */}
+      <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-[#0a0613]/75 to-black/90 pointer-events-none" />
+      {/* floating sparkles */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {CALL_SPARKLES.map((p, i) => (
+          <span key={i} className="absolute rounded-full bg-white animate-pulse"
+            style={{ top: p.top, left: p.left, width: p.s, height: p.s, opacity: 0.5, animationDelay: `${i * 0.4}s`, boxShadow: `0 0 6px ${accentColor}` }} />
+        ))}
       </div>
-      <div className="px-4 pt-2">
-        <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${callStateStyles.textClass} ${callStateStyles.ringClass}`}>
-          <span>{callStateStyles.label}</span>
-          <div className="flex items-end gap-1 h-3" aria-hidden>
-            {[10, 18, 13, 16].map((h, idx) => (
-              <span
-                key={`${h}-${idx}`}
-                className={`w-1 rounded-full ${callStateStyles.waveClass} ${displayCallState === 'speaking' ? 'animate-pulse' : ''}`}
-                style={{ height: `${displayCallState === 'speaking' ? h : 6}px`, animationDelay: `${idx * 90}ms` }}
-              />
+      <div className="relative z-10 flex flex-col h-full">
+      {/* top channel bar */}
+      <div className="relative px-5 pt-9">
+        <div className="absolute top-9 left-5 leading-tight">
+          <div className="text-[9px] tracking-[0.28em] text-white/45 font-semibold">PRIVATE CHANNEL</div>
+          <div className="mt-1.5 flex items-center gap-1.5 text-[8px] tracking-[0.22em] text-white/35">
+            VOICE SYNC
+            <span className="flex items-center gap-[2px] h-2">
+              {CALL_WAVE.slice(0, 7).map((h, i) => (
+                <span key={i} className="w-[2px] rounded-full bg-white/40" style={{ height: `${waveActive ? Math.max(2, h / 4) : 2}px` }} />
+              ))}
+            </span>
+          </div>
+        </div>
+        <div className="absolute top-9 right-5 flex items-center gap-1 text-[9px] tracking-[0.2em] text-white/45 font-medium">
+          信号良好
+          <span className="flex items-end gap-[2px] h-2.5 ml-0.5">
+            {[4, 6, 8, 10].map((h, i) => (
+              <span key={i} className="w-[2px] rounded-full" style={{ height: `${h}px`, background: i < 3 ? 'rgba(255,255,255,.65)' : accentColor }} />
+            ))}
+          </span>
+          <span style={{ color: accentColor }}>✦</span>
+        </div>
+        {/* name block */}
+        <div className="pt-7 text-center">
+          <div className="text-sm" style={{ color: `${accentColor}cc`, textShadow: `0 0 12px ${accentColor}` }}>❀</div>
+          <h1 className="mt-0.5 font-serif text-[2.6rem] leading-none tracking-wide text-white" style={{ textShadow: `0 0 26px ${accentColor}aa, 0 0 6px ${accentColor}66` }}>{selectedChar?.name || '未选择'}</h1>
+          <div className="mt-2.5 text-[11px] tracking-[0.25em] text-white/55">{connSub}</div>
+          <div className="mt-1.5 text-lg tabular-nums font-extralight tracking-[0.2em]" style={{ color: accentColor }}>{formatDuration(elapsedSeconds)}</div>
+        </div>
+      </div>
+      {/* portrait + aura */}
+      <div className="pt-3 pb-1 flex flex-col items-center justify-center">
+        <div className="relative w-40 h-40">
+          <div className={`absolute -inset-3 rounded-full blur-xl ${waveActive ? 'animate-pulse' : ''}`} style={{ background: `radial-gradient(closest-side, ${accentColor}, transparent)`, opacity: waveActive ? 0.8 : 0.4 }} />
+          <div className="absolute -inset-1 rounded-full" style={{ boxShadow: `0 0 0 1px ${accentColor}55, inset 0 0 24px ${accentColor}33` }} />
+          <div className={`absolute inset-0 rounded-full border ${displayCallState === 'speaking' ? 'animate-ping' : 'opacity-40'}`} style={{ borderColor: `${accentColor}66` }} />
+          {selectedChar?.avatar
+            ? <img src={selectedChar.avatar} alt={selectedChar.name} className="relative z-10 w-full h-full rounded-full object-cover" style={{ boxShadow: `0 0 30px ${accentColor}55` }} />
+            : <div className="relative z-10 w-full h-full rounded-full flex items-center justify-center text-4xl font-serif" style={{ backgroundColor: `${accentColor}55` }}>{selectedChar?.name?.[0] || '角'}</div>}
+        </div>
+        {/* analyzing status + waveform */}
+        <div className="mt-5 flex flex-col items-center gap-2">
+          <div className="text-center leading-tight">
+            <div className="text-sm text-white/85">{analyzeLabel.cn}{waveActive ? '…' : ''}</div>
+            <div className="text-[9px] tracking-[0.3em] text-white/35 mt-0.5">{analyzeLabel.en}</div>
+          </div>
+          <div className="flex items-center justify-center gap-[3px] h-7">
+            {CALL_WAVE.map((h, i) => (
+              <span key={i} className={`w-[3px] rounded-full transition-all duration-300 ${waveActive ? 'animate-pulse' : ''}`}
+                style={{ height: `${waveActive ? h : 3}px`, background: `linear-gradient(to top, ${accentColor}33, ${accentColor})`, animationDelay: `${i * 60}ms` }} />
             ))}
           </div>
         </div>
       </div>
-      <div className="pt-4 pb-2 flex flex-col items-center justify-center">
-        <div className={`relative w-36 h-36 rounded-full ring-1 ${callStateStyles.ringClass}`}>
-          <div className={`absolute inset-0 rounded-full ${callStateStyles.waveClass} ${displayCallState === 'speaking' ? 'animate-ping' : 'opacity-50'}`} />
-          <div className={`absolute -inset-4 rounded-full ${callStateStyles.waveClass} ${displayCallState === 'speaking' ? 'animate-pulse' : 'opacity-30'}`} />
-          {selectedChar?.avatar ? <img src={selectedChar.avatar} alt={selectedChar.name} className="relative z-10 w-full h-full rounded-full object-cover" /> : <div className="relative z-10 w-full h-full rounded-full flex items-center justify-center text-3xl" style={{ backgroundColor: `${accentColor}60` }}>{selectedChar?.name?.[0] || '角'}</div>}
-        </div>
-      </div>
-      <div ref={callScrollableRef} className="flex-1 overflow-y-auto no-scrollbar px-6 py-2 space-y-3">
+      <div ref={callScrollableRef} className="flex-1 min-h-0 overflow-y-auto no-scrollbar mx-4 mb-2 px-4 py-3 space-y-3 rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-md" style={{ boxShadow: `inset 0 1px 0 ${accentColor}33` }}>
         {!bubbles.length && (
           <div className="flex flex-col items-center justify-center py-6 text-center">
-            <p className="text-base text-slate-300/90">电话已接通</p>
-            <p className="text-sm text-slate-400/80 mt-2">
+            <p className="text-base text-white/85">电话已接通</p>
+            <p className="text-sm text-white/55 mt-2">
               {callState === 'connecting'
                 ? `${selectedChar?.name || '对方'}正在接听……`
                 : selectedChar?.name ? `${selectedChar.name}在等你开口……` : '对方在等你开口……'}
             </p>
             {callState === 'connecting'
-              ? <p className="text-xs text-slate-500/60 mt-4 animate-pulse">请稍等</p>
-              : <p className="text-xs text-slate-500/60 mt-4">在下方输入你想说的话</p>}
+              ? <p className="text-xs text-white/35 mt-4 animate-pulse">请稍等</p>
+              : <p className="text-xs text-white/35 mt-4">在下方输入你想说的话</p>}
           </div>
         )}
         {bubbles.map((bubble, index) => {
@@ -1128,8 +1171,12 @@ const CallApp: React.FC = () => {
             style={{ opacity }}
             className={`px-1 py-1 ${bubble.role === 'user' ? 'text-right' : ''}`}
           >
-            <div className="text-[10px] text-slate-300/80 mb-1">{bubble.role === 'user' ? '你' : selectedChar?.name} · {bubble.time}</div>
-            <div className={`${sizeClass} whitespace-pre-wrap leading-relaxed ${bubble.role === 'user' ? 'text-cyan-100/90' : 'text-white'}`}>
+            <div className={`text-[10px] text-white/45 mb-1 flex items-center gap-1 ${bubble.role === 'user' ? 'justify-end' : ''}`}>
+              {bubble.role !== 'user' && <span className="text-[8px]" style={{ color: accentColor }}>◍</span>}
+              <span style={bubble.role !== 'user' ? { color: `${accentColor}dd` } : undefined}>{bubble.role === 'user' ? '你' : selectedChar?.name}</span>
+              <span>· {bubble.time}</span>
+            </div>
+            <div className={`${sizeClass} whitespace-pre-wrap leading-relaxed ${bubble.role === 'user' ? 'inline-block text-left text-white/90 bg-white/[0.06] border border-white/10 rounded-2xl rounded-tr-sm px-3 py-1.5' : 'text-white/95'}`}>
               {bubble.role === 'assistant' ? (() => {
                 const { display, voiceText } = extractVoiceTag(line || bubble.text);
                 return <>
@@ -1150,45 +1197,64 @@ const CallApp: React.FC = () => {
       </div>
       {showInputPanel && (
         <div className="px-4 pb-2">
-          <div className="rounded-2xl border border-white/15 bg-black/40 backdrop-blur-sm p-2 flex gap-2">
+          <div className="rounded-2xl border border-white/12 bg-black/30 backdrop-blur-md p-2 flex gap-2" style={{ boxShadow: `inset 0 0 20px ${accentColor}1f` }}>
             <input
               value={draftInput}
               onChange={(e) => setDraftInput(e.target.value)}
-              className="flex-1 bg-transparent px-3 text-sm outline-none placeholder:text-slate-500"
+              className="flex-1 bg-transparent px-3 text-sm outline-none placeholder:text-white/35"
               placeholder={sendingBusy ? `${selectedChar?.name || '对方'}正在想……` : `想对${selectedChar?.name || '对方'}说什么？`}
               autoFocus
             />
-            <button onClick={handleTurn} disabled={sendingBusy} className="px-4 py-2 rounded-xl text-sm font-medium text-white disabled:opacity-40 transition active:scale-95" style={{ backgroundColor: accentColor }}>{sendingBusy ? '…' : '说'}</button>
+            <button onClick={handleTurn} disabled={sendingBusy} className="px-4 py-2 rounded-xl text-sm font-medium text-white disabled:opacity-40 transition active:scale-95" style={{ backgroundColor: accentColor, boxShadow: `0 0 16px ${accentColor}66` }}>{sendingBusy ? '…' : '说'}</button>
           </div>
         </div>
       )}
-      <div className="px-5 pb-5 pt-1.5">
-        <div className="rounded-3xl border border-white/15 bg-white/8 backdrop-blur-md px-6 py-3 flex items-center justify-between">
-          <button onClick={() => setShowInputPanel(prev => !prev)} className={`w-12 h-12 rounded-full border flex items-center justify-center transition ${showInputPanel ? 'bg-emerald-400/25 border-emerald-300/50' : 'bg-white/10 border-white/20'}`}>
-            <Microphone size={22} weight="fill" className={showInputPanel ? 'text-emerald-100' : 'text-slate-300'} />
+      <div className="px-7 pb-7 pt-1.5">
+        <div className="flex items-end justify-between">
+          {/* mic */}
+          <button onClick={() => setShowInputPanel(prev => !prev)} className="flex flex-col items-center gap-1.5 transition active:scale-95">
+            <span className="w-14 h-14 rounded-full border flex items-center justify-center backdrop-blur-md transition"
+              style={showInputPanel ? { background: `${accentColor}33`, borderColor: `${accentColor}88`, boxShadow: `0 0 18px ${accentColor}55` } : { background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.15)' }}>
+              <Microphone size={22} weight="fill" className="text-white/90" />
+            </span>
+            <span className="text-[10px] text-white/70">麦克风</span>
+            <span className="text-[8px] tracking-[0.15em]" style={{ color: showInputPanel ? accentColor : 'rgba(255,255,255,0.3)' }}>{showInputPanel ? 'ON' : 'OFF'}</span>
           </button>
-          <button
-            onClick={() => setShowLangPicker(prev => !prev)}
-            className={`w-12 h-12 rounded-full border flex items-center justify-center transition ${voiceLang ? 'bg-amber-400/25 border-amber-300/50' : 'bg-white/10 border-white/20'}`}
-            title="语音语种"
-          >
-            <Translate size={22} weight="fill" className={voiceLang ? 'text-amber-100' : 'text-slate-300'} />
+          {/* translate */}
+          <button onClick={() => setShowLangPicker(prev => !prev)} title="语音语种" className="flex flex-col items-center gap-1.5 transition active:scale-95">
+            <span className="w-14 h-14 rounded-full border flex items-center justify-center backdrop-blur-md transition"
+              style={voiceLang ? { background: `${accentColor}33`, borderColor: `${accentColor}88`, boxShadow: `0 0 18px ${accentColor}55` } : { background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.15)' }}>
+              <Translate size={22} weight="fill" className="text-white/90" />
+            </span>
+            <span className="text-[10px] text-white/70">翻译</span>
+            <span className="text-[8px] tracking-[0.15em]" style={{ color: voiceLang ? accentColor : 'rgba(255,255,255,0.3)' }}>{voiceLang ? 'ON' : 'OFF'}</span>
           </button>
+          {/* end call (center) */}
+          <button onClick={handleHangup} className="flex flex-col items-center gap-1.5 transition active:scale-95">
+            <span className="w-16 h-16 rounded-full flex items-center justify-center border border-rose-200/40"
+              style={{ background: 'linear-gradient(135deg, #f0569f, #b4347b)', boxShadow: `0 0 30px #f0569f88` }}>
+              <PhoneDisconnect size={26} weight="fill" className="text-white" />
+            </span>
+            <span className="text-[10px] text-white/80">结束通话</span>
+          </button>
+          {/* speaker */}
           <button
             onClick={() => {
               const next = !isSpeakerOn;
               setIsSpeakerOn(next);
               if (!next && isAudioPlaying) pauseAudio();
             }}
-            className={`w-12 h-12 rounded-full border flex items-center justify-center transition ${isSpeakerOn ? 'bg-cyan-400/25 border-cyan-300/50' : 'bg-rose-400/25 border-rose-300/50'}`}
-            title={isSpeakerOn ? '静音（不调用语音合成）' : '取消静音'}
+            title={isSpeakerOn ? '外放开启' : '外放关闭'}
+            className="flex flex-col items-center gap-1.5 transition active:scale-95"
           >
-            {isSpeakerOn
-              ? <SpeakerHigh size={22} weight="fill" className="text-cyan-100" />
-              : <SpeakerSlash size={22} weight="fill" className="text-rose-300" />}
-          </button>
-          <button onClick={handleHangup} className="w-14 h-14 rounded-full bg-rose-400/80 border border-rose-200/60 flex items-center justify-center transition active:scale-95">
-            <PhoneDisconnect size={24} weight="fill" className="text-rose-950" />
+            <span className="w-14 h-14 rounded-full border flex items-center justify-center backdrop-blur-md transition"
+              style={isSpeakerOn ? { background: `${accentColor}33`, borderColor: `${accentColor}88`, boxShadow: `0 0 18px ${accentColor}55` } : { background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.15)' }}>
+              {isSpeakerOn
+                ? <SpeakerHigh size={22} weight="fill" className="text-white/90" />
+                : <SpeakerSlash size={22} weight="fill" className="text-white/50" />}
+            </span>
+            <span className="text-[10px] text-white/70">外放</span>
+            <span className="text-[8px] tracking-[0.15em]" style={{ color: isSpeakerOn ? accentColor : 'rgba(255,255,255,0.3)' }}>{isSpeakerOn ? 'ON' : 'OFF'}</span>
           </button>
         </div>
       </div>
