@@ -12,6 +12,7 @@
 
 export const DEFAULT_BUBBLE_SIZE = 40;
 export const DEFAULT_EDGE_PAD = 8;
+export const IOS_STANDALONE_TOP_FALLBACK = 44;
 
 const clampRange = (value: number, lo: number, hi: number): number =>
   Math.min(Math.max(value, lo), Math.max(lo, hi));
@@ -55,6 +56,30 @@ export interface RawInsets {
   padBottom: number;
   safeTop: number;
 }
+
+export interface SafeTopInsetInput {
+  standaloneSafeTop: number;
+  probedSafeTop: number;
+  isIOSStandalone: boolean;
+  fallback?: number;
+}
+
+/**
+ * 顶部安全区的来源优先级：
+ * 1. :root 上的 --standalone-safe-area-top（iosStandalone.ts 已带 iOS 冷启动 44px 兜底）
+ * 2. 当前 env/probe 读数
+ * 3. iOS standalone 下最后再兜 44px，防止变量还没初始化时先拖进刘海
+ */
+export const resolveSafeTopInset = ({
+  standaloneSafeTop,
+  probedSafeTop,
+  isIOSStandalone,
+  fallback = IOS_STANDALONE_TOP_FALLBACK,
+}: SafeTopInsetInput): number => {
+  if (standaloneSafeTop > 0) return standaloneSafeTop;
+  if (probedSafeTop > 0) return probedSafeTop;
+  return isIOSStandalone ? fallback : 0;
+};
 
 /**
  * 把外壳 padding 与真机刘海合成球要让出的安全区高度。

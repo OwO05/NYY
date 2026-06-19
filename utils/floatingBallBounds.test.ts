@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clampBubblePos, clampExpandedBottom, resolveInsets } from './floatingBallBounds';
+import { clampBubblePos, clampExpandedBottom, resolveInsets, resolveSafeTopInset } from './floatingBallBounds';
 
 // 设备模型：竖屏 iPhone，父容器 390×800，顶部刘海 44、底部 home 条 34。
 const parentW = 390;
@@ -65,5 +65,31 @@ describe('resolveInsets（安全区合成）', () => {
   it('底部只取 paddingBottom，不叠加真机 safe-bottom（避免已迁移 App 多让）', () => {
     expect(resolveInsets({ padTop: 0, padBottom: 0, safeTop: 44 }).insetBottom).toBe(0);
     expect(resolveInsets({ padTop: 0, padBottom: 34, safeTop: 44 }).insetBottom).toBe(34);
+  });
+});
+
+describe('resolveSafeTopInset（顶部安全区来源）', () => {
+  it('iOS standalone 冷启动：raw probe 为 0 时复用 CSS 变量兜底', () => {
+    expect(resolveSafeTopInset({
+      standaloneSafeTop: 44,
+      probedSafeTop: 0,
+      isIOSStandalone: true,
+    })).toBe(44);
+  });
+
+  it('CSS 变量还没初始化且 raw probe 仍为 0 时，iOS standalone 继续兜 44px', () => {
+    expect(resolveSafeTopInset({
+      standaloneSafeTop: 0,
+      probedSafeTop: 0,
+      isIOSStandalone: true,
+    })).toBe(44);
+  });
+
+  it('非 iOS standalone 没有安全区读数时保持 0', () => {
+    expect(resolveSafeTopInset({
+      standaloneSafeTop: 0,
+      probedSafeTop: 0,
+      isIOSStandalone: false,
+    })).toBe(0);
   });
 });
