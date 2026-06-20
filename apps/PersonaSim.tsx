@@ -314,7 +314,7 @@ const PersonaSim: React.FC<Props> = ({ targetChar, onExit, openLifeLog, sim, onS
                                 这是一张通往 TA 的体验卡。我们借这部手机，为你点演一段「<span style={{ color: ACCENT }}>可能发生过</span>」的人生切片——画面、独白与痕迹，皆由此刻的 AI 即兴演绎。
                             </p>
                             <p className="text-[10px] text-white/45 leading-relaxed mt-2.5 pt-2.5 border-t border-dashed border-white/15">
-                                ※ 它只是献给你的一出小剧场，是一种「如果」。<br />并不等于角色的真实经历或设定——看个尽兴就好。
+                                ※ 它只是献给你的一出小剧场，是一种「如果」。<br />并不等于角色的真实经历或设定——纵情入戏，散场即忘，无需当真。
                             </p>
                         </div>
                     </div>
