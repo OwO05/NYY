@@ -293,14 +293,30 @@ const PersonaSim: React.FC<Props> = ({ targetChar, onExit, openLifeLog, sim, onS
                     </button>
                 } />
                 <div className="flex-1 overflow-y-auto no-scrollbar px-6 pt-2 pb-10">
-                    <div className="mb-6">
+                    <div className="mb-5">
                         <div className="text-[10px] tracking-[0.35em] uppercase" style={{ color: ACCENT }}>Persona Simulation</div>
                         <h1 className="text-[26px] font-light text-white mt-2 leading-tight" style={{ fontFamily: "'Shippori Mincho','Noto Sans SC',serif" }}>
                             成为 {targetChar.name} 的<br />一段人生
                         </h1>
-                        <p className="text-[12px] text-white/45 mt-3 leading-relaxed">
-                            你不是在查看 TA 的手机。<br />接下来这段时间，你就是 TA。
-                        </p>
+                    </div>
+
+                    {/* 体验卡 · 中二叠甲：显得很牛逼，同时声明这只是小剧场、不代表角色真实情况 */}
+                    <div className="relative rounded-2xl overflow-hidden mb-6 border border-[#b89bff]/25"
+                        style={{ background: 'linear-gradient(135deg, rgba(184,155,255,0.16), rgba(184,155,255,0.03))' }}>
+                        <div className="absolute left-0 top-0 bottom-0 w-1" style={{ background: ACCENT }} />
+                        <div className="absolute -top-8 -right-6 w-28 h-28 rounded-full blur-2xl pointer-events-none" style={{ background: 'radial-gradient(circle, rgba(184,155,255,0.4), transparent 70%)' }} />
+                        <div className="relative p-4 pl-5">
+                            <div className="flex items-center justify-between mb-2.5">
+                                <span className="text-[9px] tracking-[0.28em] uppercase font-bold" style={{ color: ACCENT }}>✦ Experience Ticket · 体验卡</span>
+                                <span className="text-[8px] tracking-[0.2em] uppercase text-white/45 border border-white/15 rounded px-1.5 py-0.5">Fiction Only</span>
+                            </div>
+                            <p className="text-[11.5px] text-white/75 leading-relaxed" style={{ fontFamily: "'Shippori Mincho','Noto Sans SC',serif" }}>
+                                这是一张通往 TA 的体验卡。我们借这部手机，为你点演一段「<span style={{ color: ACCENT }}>可能发生过</span>」的人生切片——画面、独白与痕迹，皆由此刻的 AI 即兴演绎。
+                            </p>
+                            <p className="text-[10px] text-white/45 leading-relaxed mt-2.5 pt-2.5 border-t border-dashed border-white/15">
+                                ※ 它只是献给你的一出小剧场，是一种「如果」。<br />并不等于角色的真实经历或设定——看个尽兴就好。
+                            </p>
+                        </div>
                     </div>
 
                     {/* mode tabs */}
@@ -313,30 +329,38 @@ const PersonaSim: React.FC<Props> = ({ targetChar, onExit, openLifeLog, sim, onS
                             </button>
                         ))}
                     </div>
-                    <p className="text-[11px] text-white/35 mb-3 px-1">
+                    <p className="text-[11px] text-white/35 mb-4 px-1">
                         {mode === 'daily' ? '体验 TA 某个普通日子的生活 · 生活感与陪伴' : '体验 TA 人生中的某个特殊事件 · 情绪张力'}
                     </p>
 
-                    <div className="space-y-2 mb-5">
-                        {(mode === 'daily' ? DAILY : EVENTS).map(s => (
-                            <button key={s} onClick={() => requestStart(mode, s)}
-                                className="w-full text-left rounded-2xl px-4 py-3.5 bg-white/[0.035] border border-white/[0.06] active:scale-[0.99] transition flex items-center justify-between group">
-                                <span className="text-[13.5px] text-white/85">{s}</span>
-                                <ArrowRight size={15} className="text-white/25 group-active:translate-x-0.5 transition-transform" />
-                            </button>
-                        ))}
+                    {/* ① 选方向（点一下填进下方，可继续编辑） */}
+                    <div className="text-[10px] uppercase tracking-wider text-white/40 mb-2 px-1">① 选个大方向</div>
+                    <div className="grid grid-cols-2 gap-2 mb-5">
+                        {(mode === 'daily' ? DAILY : EVENTS).map(s => {
+                            const active = theme.trim() === s;
+                            return (
+                                <button key={s} onClick={() => setTheme(s)}
+                                    className="text-left rounded-2xl px-3.5 py-3 border transition active:scale-[0.98]"
+                                    style={active
+                                        ? { background: ACCENT, color: '#1a1530', borderColor: 'transparent' }
+                                        : { background: 'rgba(255,255,255,0.035)', borderColor: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.85)' }}>
+                                    <span className="text-[12.5px] font-medium">{s}</span>
+                                </button>
+                            );
+                        })}
                     </div>
 
-                    <div className="rounded-2xl p-3 bg-white/[0.025] border border-white/[0.06]">
-                        <label className="text-[10px] uppercase tracking-wider text-white/40 px-1">自定义体验</label>
-                        <div className="flex gap-2 mt-2">
-                            <input value={theme} onChange={e => setTheme(e.target.value)}
-                                onKeyDown={e => { if (e.key === 'Enter') requestStart(mode, theme); }}
-                                placeholder="例如：搬家前最后一晚 / 收到那条消息的清晨"
-                                className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-xl px-3 py-2.5 text-[12.5px] text-white placeholder-white/25 outline-none" />
-                            <button onClick={() => requestStart(mode, theme)} className="px-4 rounded-xl text-[12px] font-semibold text-[#1a1530]" style={{ background: ACCENT }}>开始</button>
-                        </div>
-                    </div>
+                    {/* ② 补细节（与方向合并，二者不再二选一） */}
+                    <div className="text-[10px] uppercase tracking-wider text-white/40 mb-2 px-1">② 补点细节 · 也可直接自己写</div>
+                    <textarea value={theme} onChange={e => setTheme(e.target.value)}
+                        placeholder="选个方向后在这里补充具体情境，或直接写你想看的。例如：放学后的傍晚 · 下了雨，TA 没带伞，在便利店门口等一个不一定会来的人。"
+                        className="w-full h-24 bg-white/[0.05] border border-white/[0.08] rounded-2xl px-3.5 py-3 text-[12.5px] text-white placeholder-white/25 outline-none resize-none leading-relaxed mb-4" />
+
+                    <button onClick={() => requestStart(mode, theme)} disabled={!theme.trim()}
+                        className="w-full py-3.5 rounded-2xl text-[13px] font-semibold flex items-center justify-center gap-2 active:scale-[0.99] transition disabled:opacity-40"
+                        style={{ background: ACCENT, color: '#1a1530' }}>
+                        开始演出 <ArrowRight size={15} weight="bold" />
+                    </button>
                 </div>
             </Shell>
         );
@@ -480,7 +504,7 @@ const vibeTint: Record<Vibe, string> = {
 // 逐字敲出的内心独白（底部），按情绪微调色调
 const MonoLine: React.FC<{ text: string; vibe?: Vibe }> = ({ text, vibe = 'calm' }) => (
     <div className="absolute left-0 right-0 bottom-6 px-8 text-center pointer-events-none z-20">
-        <span className="inline-block px-3 py-1 rounded-2xl bg-black/30 backdrop-blur-sm">
+        <span className="inline-block px-3 py-1 rounded-2xl bg-black/70">
             <Typewriter drafts={[]} sent={text} placeholder=""
                 className={`text-[15px] leading-relaxed ${vibe === 'anxious' ? 'tracking-tight' : ''}`} />
         </span>
@@ -565,14 +589,14 @@ const MoodThought: React.FC<{ text: string; vibe?: Vibe }> = ({ text, vibe = 'ca
 const ScreenContent: React.FC<{ beat: Beat; char: CharacterProfile; showMono: boolean; dimmed?: boolean }> =
     ({ beat, char, showMono, dimmed }) => {
         const mono = showMono && beat.monologue ? <MonoLine text={beat.monologue} vibe={beat.vibe} /> : null;
-        const dim = dimmed ? <div className="absolute inset-0 bg-black/25 backdrop-blur-[1px] z-10 pointer-events-none" /> : null;
+        const dim = dimmed ? <div className="absolute inset-0 bg-black/45 z-10 pointer-events-none" /> : null;
 
         if (beat.kind === 'lock') {
             return (
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
                     <div className="text-[64px] font-extralight text-white tracking-tight tabular-nums leading-none animate-fade-in" style={{ textShadow: '0 4px 24px rgba(0,0,0,0.5)' }}>{beat.time || ''}</div>
                     {beat.notif && (
-                        <div className="mt-10 w-[78%] rounded-2xl px-4 py-3 bg-white/[0.1] backdrop-blur-xl border border-white/[0.12] animate-slide-up">
+                        <div className="mt-10 w-[78%] rounded-2xl px-4 py-3 bg-black/70 border border-white/[0.15] animate-slide-up">
                             <div className="text-[10px] text-white/50 uppercase tracking-wide mb-0.5">{beat.notif.app}</div>
                             <div className="text-[12.5px] text-white/90 font-medium">{beat.notif.title}</div>
                             <div className="text-[11px] text-white/55 mt-0.5">{beat.notif.body}</div>
@@ -588,7 +612,7 @@ const ScreenContent: React.FC<{ beat: Beat; char: CharacterProfile; showMono: bo
             return (
                 <div className="absolute inset-0 flex flex-col items-center justify-center"
                     style={{ background: `radial-gradient(circle at 50% 45%, ${f?.tint || '#3a2a4a'} 0%, #07080c 78%)` }}>
-                    <div className="absolute top-4 left-4 right-4 rounded-2xl px-4 py-2.5 bg-black/50 backdrop-blur-xl border border-white/[0.12] flex items-center gap-2 animate-slide-down">
+                    <div className="absolute top-4 left-4 right-4 rounded-2xl px-4 py-2.5 bg-black/75 border border-white/[0.15] flex items-center gap-2 animate-slide-down">
                         <ImageSquare size={16} className="text-pink-300" />
                         <span className="text-[12px] text-white/85 font-medium">{f?.label || f?.date || '过去的某天'}</span>
                     </div>
@@ -631,7 +655,7 @@ const ScreenContent: React.FC<{ beat: Beat; char: CharacterProfile; showMono: bo
 // ============================================================
 const Overlay: React.FC<{ beat: Beat }> = ({ beat }) => {
     if (beat.kind === 'thought') {
-        const scrim = beat.vibe === 'happy' ? 'bg-black/30' : beat.vibe === 'chaotic' ? 'bg-black/60' : 'bg-black/45 backdrop-blur-sm';
+        const scrim = beat.vibe === 'happy' ? 'bg-black/55' : beat.vibe === 'chaotic' ? 'bg-black/75' : 'bg-black/70';
         return (
             <div className={`absolute inset-0 ${scrim}`}>
                 <MoodThought text={beat.monologue || '……'} vibe={beat.vibe} />
@@ -643,7 +667,7 @@ const Overlay: React.FC<{ beat: Beat }> = ({ beat }) => {
     const toneColor = n?.tone === 'sms' ? '#4ade80' : n?.tone === 'flashback' ? '#ff5fb0' : ACCENT;
     return (
         <div className="absolute inset-0">
-            <div className="absolute top-4 left-4 right-4 rounded-2xl px-4 py-3 bg-black/60 backdrop-blur-2xl border border-white/[0.14] animate-notif-pop shadow-2xl">
+            <div className="absolute top-4 left-4 right-4 rounded-2xl px-4 py-3 bg-[#16131f]/95 border border-white/[0.16] animate-notif-pop shadow-2xl">
                 <div className="flex items-center gap-2 mb-1">
                     <span className="w-2 h-2 rounded-full" style={{ background: toneColor, boxShadow: `0 0 8px ${toneColor}` }} />
                     <span className="text-[10px] text-white/55 uppercase tracking-wide">{n?.app}</span>
