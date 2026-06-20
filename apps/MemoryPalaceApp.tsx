@@ -13,6 +13,9 @@ import {
 import type { Anticipation, MigrationProgress, DigestResult, MemoryLink, EventBox } from '../utils/memoryPalace';
 import type { Message } from '../types';
 
+/** 手动总结面板：每页渲染多少条聊天记录（翻页，避免一次性塞几百条 DOM 卡顿） */
+const RANGE_PAGE_SIZE = 100;
+
 /** 手动总结面板：把毫秒时间戳格式化成「2026-03-20 14:30」 */
 const fmtRangeTs = (ts: number): string => {
     if (!ts) return '';
@@ -461,6 +464,7 @@ export default function MemoryPalaceApp() {
     const [rangeMessages, setRangeMessages] = useState<Message[]>([]);
     const [rangeLoading, setRangeLoading] = useState(false);
     const [rangeQuery, setRangeQuery] = useState('');
+    const [rangePage, setRangePage] = useState(0); // 当前页（0 起）
     const [rangeStartId, setRangeStartId] = useState<number | null>(null);
     const [rangeEndId, setRangeEndId] = useState<number | null>(null);
     // 点一条消息先进入"待确认"，弹出[设为起点/设为终点]，避免误触
@@ -1254,6 +1258,8 @@ export default function MemoryPalaceApp() {
                 .filter((m: Message) => m && typeof m.content === 'string' && m.content.trim().length > 0)
                 .sort((a: Message, b: Message) => a.id - b.id);
             setRangeMessages(list);
+            // 默认翻到最后一页（最新消息），和聊天记录翻到底部一致
+            setRangePage(Math.max(0, Math.ceil(list.length / RANGE_PAGE_SIZE) - 1));
         } catch (e: any) {
             addToast(`加载聊天记录失败：${e?.message || e}`, 'error');
             setRangeMessages([]);
@@ -3304,9 +3310,11 @@ create table if not exists memory_vectors (
                     const filtered = q
                         ? rangeMessages.filter(m => (m.content || '').toLowerCase().includes(q) || fmtRangeTs(m.timestamp).includes(q))
                         : rangeMessages;
-                    const MAX_ROWS = 600;
-                    const truncated = filtered.length > MAX_ROWS;
-                    const shown = truncated ? filtered.slice(filtered.length - MAX_ROWS) : filtered;
+                    // 翻页：每页 RANGE_PAGE_SIZE 条，避免一次渲染几百条 DOM
+                    const totalPages = Math.max(1, Math.ceil(filtered.length / RANGE_PAGE_SIZE));
+                    const page = Math.min(Math.max(0, rangePage), totalPages - 1);
+                    const pageStart = page * RANGE_PAGE_SIZE;
+                    const shown = filtered.slice(pageStart, pageStart + RANGE_PAGE_SIZE);
 
                     return (
                         <div
@@ -3351,7 +3359,7 @@ create table if not exists memory_vectors (
                                         </span>
                                         <input
                                             value={rangeQuery}
-                                            onChange={e => setRangeQuery(e.target.value)}
+                                            onChange={e => { setRangeQuery(e.target.value); setRangePage(0); }}
                                             placeholder="模糊搜索内容或日期（如 生日 / 2026-03）"
                                             style={{
                                                 width: '100%', padding: '8px 10px 8px 30px', borderRadius: 10,
@@ -3371,9 +3379,29 @@ create table if not exists memory_vectors (
                                             {rangeMessages.length === 0 ? '这个角色还没有聊天记录' : '没有匹配的消息'}
                                         </div>
                                     )}
-                                    {!rangeLoading && truncated && (
-                                        <div style={{ textAlign: 'center', color: '#a16207', fontSize: 10, padding: '4px 0 8px', background: '#fefce8', borderRadius: 8, marginBottom: 6 }}>
-                                            只显示最近 {MAX_ROWS} 条，更早的请用上方搜索定位
+                                    {!rangeLoading && filtered.length > RANGE_PAGE_SIZE && (
+                                        <div style={{
+                                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                            gap: 8, padding: '6px 8px', marginBottom: 6,
+                                            background: '#faf5ff', borderRadius: 8,
+                                        }}>
+                                            <button
+                                                onClick={() => setRangePage(p => Math.max(0, p - 1))}
+                                                disabled={page <= 0}
+                                                style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 7, border: '1px solid #ddd6fe', background: page <= 0 ? '#f1f5f9' : '#fff', color: page <= 0 ? '#cbd5e1' : '#7c3aed', cursor: page <= 0 ? 'not-allowed' : 'pointer' }}
+                                            >
+                                                ‹ 更早
+                                            </button>
+                                            <span style={{ fontSize: 10, color: '#7c3aed', fontWeight: 600 }}>
+                                                第 {page + 1} / {totalPages} 页 · 共 {filtered.length} 条
+                                            </span>
+                                            <button
+                                                onClick={() => setRangePage(p => Math.min(totalPages - 1, p + 1))}
+                                                disabled={page >= totalPages - 1}
+                                                style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 7, border: '1px solid #ddd6fe', background: page >= totalPages - 1 ? '#f1f5f9' : '#fff', color: page >= totalPages - 1 ? '#cbd5e1' : '#7c3aed', cursor: page >= totalPages - 1 ? 'not-allowed' : 'pointer' }}
+                                            >
+                                                更新 ›
+                                            </button>
                                         </div>
                                     )}
                                     {!rangeLoading && shown.map(m => {
@@ -3383,6 +3411,7 @@ create table if not exists memory_vectors (
                                         const inRange = lo != null && hi != null && m.id >= lo && m.id <= hi;
                                         const isEndpoint = (lo != null && m.id === lo) || (hi != null && m.id === hi) || (rangeStartId != null && rangeEndId == null && isStart);
                                         const who = m.role === 'user' ? '我' : m.role === 'system' ? '系统' : char.name;
+                                        const isDate = (m.metadata as any)?.source === 'date';
                                         const preview = (m.content || '').replace(/\s+/g, ' ').trim().slice(0, 48);
                                         return (
                                             <div
@@ -3395,7 +3424,10 @@ create table if not exists memory_vectors (
                                                 }}
                                             >
                                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                                                    <span style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>
+                                                    <span style={{ fontSize: 10, color: '#64748b', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                                                        {isDate && (
+                                                            <span style={{ fontSize: 9, fontWeight: 700, color: '#db2777', background: '#fce7f3', borderRadius: 5, padding: '0 5px' }}>约会</span>
+                                                        )}
                                                         {who} · {fmtRangeTs(m.timestamp)}
                                                     </span>
                                                     {(isStart || isEnd) && (
