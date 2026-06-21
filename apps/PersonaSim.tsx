@@ -265,6 +265,12 @@ const PersonaSim: React.FC<Props> = ({ targetChar, onExit, openLifeLog, sim, onS
         }
     }, [idx, phase, beat, persist]);
 
+    // 中途退出（点「退出」/ 系统返回 / 切走 App）也要落库：组件卸载时补存这场演出。
+    // persist() 自带 savedRef + script 守卫——没开始播放或已存过都会自动跳过，不会误写。
+    const persistRef = useRef(persist);
+    persistRef.current = persist;
+    useEffect(() => () => { persistRef.current(); }, []);
+
     // ----- autoplay -----
     useEffect(() => {
         if (phase !== 'play' || !autoplay || !beat) return;
