@@ -839,6 +839,15 @@ const Chat: React.FC = () => {
         // 和笔记 id/token，直接解析就能建卡，让「没部署小红书 MCP」的用户也能让角色看到分享了哪篇笔记。
         // 配了 MCP 的话再抓详情补正文/封面/作者（锦上添花，抓失败也不影响基础卡）。
         if (type === 'text') {
+            let cardCreated = false;
+            // 纯分享判定：去掉链接 + 小红书样板（【标题】/emoji/暗号）后，还剩用户自己写的话吗？
+            const linkResidual = (txt: string): string => txt
+                .replace(/https?:\/\/\S+/g, ' ')
+                .replace(/【[^】]*】/g, ' ')
+                .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{2B00}-\u{2BFF}]/gu, ' ')
+                .replace(/[A-Za-z0-9_\-]{8,}/g, ' ')
+                .replace(/[\s,，。.!！?？、:：;；#·\-—…"'""''（）()]/g, '')
+                .trim();
             const xhsUrlMatch = text.match(/xiaohongshu\.com\/(?:discovery\/item|explore)\/([a-f0-9]{24})/);
             if (xhsUrlMatch) {
                 const noteId = xhsUrlMatch[1];
@@ -860,10 +869,13 @@ const Chat: React.FC = () => {
                         // 详情必须带 xsec_token，token 就在用户粘贴的链接里——之前重拼 URL 把它丢了导致抓空。
                         const noteUrl = `https://www.xiaohongshu.com/explore/${noteId}${xsecToken ? `?xsec_token=${xsecToken}&xsec_source=pc_share` : ''}`;
                         const result = await XhsMcpClient.getNoteDetail(mcpUrl, noteUrl, xsecToken);
+                        if (isDevDebugAvailable()) console.log('[卡片调试] 小红书抓取 result =', result);
                         if (result.success && result.data) {
-                            const fetched = normalizeNote(result.data);
-                            // 抓到的字段补全基础卡；标题仍优先用文案标题（通常更完整可读）。
-                            note = { ...note, ...fetched, title: titleFromText || fetched.title || '', xsecToken: fetched.xsecToken || xsecToken };
+                            // bridge(Lite) 返回 { data: { note, comments } }；MCP 可能直接是 note —— 逐层解包。
+                            const noteObj = (result.data as any)?.data?.note || (result.data as any)?.note || result.data;
+                            const fetched = normalizeNote(noteObj);
+                            // 抓到的字段补全基础卡；id/标题/token 保底，标题优先文案标题（更完整可读）。
+                            note = { ...note, ...fetched, noteId: fetched.noteId || note.noteId, title: titleFromText || fetched.title || note.title, xsecToken: fetched.xsecToken || xsecToken };
                         }
                     } catch (e) {
                         console.warn('XHS link fetch via MCP failed (已用文案兜底):', e);
@@ -885,6 +897,7 @@ const Chat: React.FC = () => {
                         char.name, userProfile.name,
                     ));
                 }
+                cardCreated = true;
             }
 
             // 通用网页分享：检测到普通 http(s) 链接 → 抓取正文存成 webpage_card，
@@ -909,10 +922,16 @@ const Chat: React.FC = () => {
                             char.name, userProfile.name,
                         ));
                     }
+                    cardCreated = true;
                 } catch (e: any) {
                     console.warn('Webpage fetch failed:', e);
                     addToast(`网页抓取失败：${e?.message || '可能被站点拦截，建议在设置里配置 instant worker 作代理'}`, 'error');
                 }
+            }
+
+            // 纯分享（去掉链接/样板后没有用户自己写的话）→ 删掉那条原始链接文本，只留卡片，干净好看。
+            if (cardCreated && savedUserMsgId && !linkResidual(text)) {
+                await DB.deleteMessage(savedUserMsgId);
             }
         }
 
