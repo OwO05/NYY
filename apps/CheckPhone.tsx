@@ -990,7 +990,7 @@ Format:
             {/* App cards */}
             <div className="grid grid-cols-2 gap-3.5 mb-3.5">
                 <HomeCard icon={<ChatCircleDots size={24} weight="light" />} label="Message" sub={messageSub} accent="#8b9cff"
-                    badge={unreadChats || undefined} onClick={openChat} />
+                    onClick={openChat} />
                 <HomeCard icon={<ImagesSquare size={24} weight="light" />} label="Moments" sub={momentsSub} accent="#c084fc"
                     onClick={() => setActiveAppId('social')} />
                 <HomeCard icon={<Hamburger size={24} weight="light" />} label="Food" sub={foodSub} accent="#fbbf24"
@@ -1164,9 +1164,8 @@ Format:
                         <button onClick={() => setActiveAppId('call')} className="flex items-center justify-center text-white/70 p-2.5 hover:text-white rounded-2xl transition active:scale-90">
                             <Phone size={22} weight="light" />
                         </button>
-                        <button onClick={openChat} className="relative flex items-center justify-center text-white/70 p-2.5 hover:text-white rounded-2xl transition active:scale-90">
+                        <button onClick={openChat} className="flex items-center justify-center text-white/70 p-2.5 hover:text-white rounded-2xl transition active:scale-90">
                             <ChatCircleDots size={22} weight="light" />
-                            {unreadChats > 0 && <span className="absolute top-1 right-1 min-w-[15px] h-[15px] px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">{unreadChats}</span>}
                         </button>
                         <button onClick={handleExitPhone} aria-label="断开连接"
                             className="relative flex items-center justify-center w-14 h-14 rounded-full active:scale-90 transition -my-1"
