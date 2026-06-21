@@ -955,7 +955,9 @@ const Shell: React.FC<{ children: React.ReactNode; wallpaper?: string }> = ({ ch
 );
 
 const TopBar: React.FC<{ onBack: () => void; right?: React.ReactNode; title?: string }> = ({ onBack, right, title }) => (
-    <div className="h-14 flex items-center justify-between px-4 shrink-0 pt-2">
+    // 顶部安全区：iOS 刘海/状态栏会盖住返回键和「生活记录」，给个 safe-area-inset 兜底
+    <div className="flex items-center justify-between px-4 shrink-0 pb-2"
+        style={{ paddingTop: 'max(0.75rem, calc(env(safe-area-inset-top, 0px) + 0.5rem))' }}>
         <button onClick={onBack} className="w-9 h-9 -ml-1 rounded-full flex items-center justify-center text-white/80 bg-white/[0.05] border border-white/[0.08] active:scale-90 transition">
             <CaretLeft size={18} weight="bold" />
         </button>
