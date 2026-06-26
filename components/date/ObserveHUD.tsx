@@ -72,11 +72,16 @@ const PanelHeader: React.FC<{ charName?: string; right?: React.ReactNode }> = ({
 );
 
 const ObserveHUD: React.FC<ObserveHUDProps> = ({ observation, variant = 'hud', charName }) => {
+    // Hooks 必须无条件、且在任何 early-return 之前调用（React Rules of Hooks）。
+    // 之前这两个 useState 被放在 `if (rows.length === 0) return null` 之后，
+    // 当观测在「有内容/无内容」间切换时同一实例的 hook 数量会变，React 抛
+    // "Rendered fewer hooks than during the previous render" 直接崩掉见面页。
+    const [collapsed, setCollapsed] = useState(false);
+    const [expanded, setExpanded] = useState(false); // 独立全屏查看
+
     const rows = FIELDS.filter(f => (observation[f.key] || '').trim());
     if (rows.length === 0) return null;
 
-    const [collapsed, setCollapsed] = useState(false);
-    const [expanded, setExpanded] = useState(false); // 独立全屏查看
     const stop = (e: React.MouseEvent) => e.stopPropagation();
 
     const body = (dense: boolean) => (
