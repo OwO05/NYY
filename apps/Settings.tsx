@@ -71,6 +71,7 @@ const Settings: React.FC = () => {
   const [localUrl, setLocalUrl] = useState(apiConfig.baseUrl);
   const [localModel, setLocalModel] = useState(apiConfig.model);
   const [localStream, setLocalStream] = useState<boolean>(apiConfig.stream === true);
+  const [localUseProxy, setLocalUseProxy] = useState<boolean>(apiConfig.useProxy === true);
   const [localTemperature, setLocalTemperature] = useState<number>(
     typeof apiConfig.temperature === 'number' ? apiConfig.temperature : 0.85
   );
@@ -414,6 +415,7 @@ const Settings: React.FC = () => {
       model: localModel,
       stream: localStream,
       temperature: localTemperature,
+      useProxy: localUseProxy,
     });
     setStatusMsg('配置已保存');
     setTimeout(() => setStatusMsg(''), 2000);
@@ -1207,6 +1209,19 @@ const Settings: React.FC = () => {
                                     <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${localStream ? 'translate-x-4' : 'translate-x-0.5'}`} />
                                 </button>
                             </div>
+                            <div className="flex items-center justify-between">
+                                <div className="pr-2">
+                                    <span className="text-[10px] text-slate-400">通过本站代理 (绕过 CORS)</span>
+                                    <p className="text-[9px] text-slate-300 mt-0.5">源不开 CORS（如 Pioneer）直连报 Failed to fetch 时打开。仅 Vercel 等带后端的部署有效，GitHub Pages 纯静态无效；原生 App 无需开。</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setLocalUseProxy(v => !v)}
+                                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0 ${localUseProxy ? 'bg-slate-400' : 'bg-slate-200'}`}
+                                >
+                                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${localUseProxy ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                                </button>
+                            </div>
                             <div>
                                 <div className="flex items-center justify-between">
                                     <span className="text-[10px] text-slate-400">温度 (Temperature)</span>
@@ -1246,7 +1261,7 @@ const Settings: React.FC = () => {
                         </span>
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-slate-400 flex-shrink-0"><path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" /></svg>
                     </button>
-                    <p className="text-[11px] text-slate-400 mt-1 pl-1">「刷新模型列表」失败多为浏览器跨域（CORS）所致——服务端能拉到、浏览器拉不到。这时点上方直接手动填模型名 / 训练作业 ID 即可。</p>
+                    <p className="text-[11px] text-slate-400 mt-1 pl-1">「刷新模型列表」失败多为浏览器跨域（CORS）所致——服务端能拉到、浏览器拉不到。可打开上面的「通过本站代理」开关（Vercel 等部署）重试，或点上方直接手动填模型名 / 训练作业 ID。</p>
                 </div>
                 
                 <button onClick={handleSaveApi} className="w-full py-3 rounded-2xl font-bold text-white shadow-lg shadow-primary/20 bg-primary active:scale-95 transition-all mt-2">

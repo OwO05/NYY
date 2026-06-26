@@ -36,6 +36,45 @@ export function shouldRouteViaNativeHttp(url: string): boolean {
   return LLM_ENDPOINT_TAIL.test(url);
 }
 
+// ---- Web 同源代理（Vercel 等带后端的部署）----
+// 纯前端被 CORS 挡时，可改打本站 /api/llm-proxy（同源，不跨域），由服务端转发到上游。
+// 这是个全局开关，由 OSContext 跟随 apiConfig.useProxy 同步（参考 setMinimaxRegion 的写法）。
+let webProxyEnabled = false;
+
+export function setLlmWebProxyEnabled(enabled: boolean | undefined | null): void {
+  webProxyEnabled = !!enabled;
+}
+
+/** 本站代理端点（同源）。Vercel serverless：api/llm-proxy.ts。 */
+export const LLM_WEB_PROXY_PATH = '/api/llm-proxy';
+
+/**
+ * 是否把这个请求改走本站同源代理。
+ * 条件：非原生（原生走 CapacitorHttp 就够了）、开关打开、绝对 http(s) 的 LLM 端点，
+ * 且不是本站代理自身（防自我递归）。
+ */
+export function shouldRouteViaWebProxy(url: string): boolean {
+  if (isNativeRuntime()) return false;
+  if (!webProxyEnabled) return false;
+  if (!/^https?:\/\//i.test(url)) return false;
+  if (url.includes(LLM_WEB_PROXY_PATH)) return false;
+  return LLM_ENDPOINT_TAIL.test(url);
+}
+
+/**
+ * 把对上游的 fetch 改写成对本站 /api/llm-proxy 的 fetch：
+ * 上游真实地址放进 X-LLM-Target 头，鉴权/内容头原样保留，method/body 不变。
+ */
+export function buildWebProxyArgs(
+  resource: RequestInfo | URL,
+  config?: RequestInit,
+): [string, RequestInit] {
+  const target = String(resource);
+  const headers = headersToObject(config?.headers);
+  headers['X-LLM-Target'] = target;
+  return [LLM_WEB_PROXY_PATH, { ...(config || {}), headers }];
+}
+
 function headersToObject(headers: HeadersInit | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   if (!headers) return out;
