@@ -18,7 +18,7 @@ import {
     Plus, SignOut, CaretLeft, CaretRight, Cloud, ImagesSquare, LockSimple, Package,
     Storefront, Heart, ArrowsClockwise, Tray, DotsThree, ClockCounterClockwise, Sparkle,
     UsersThree, UserPlus, Prohibit, LinkSimple, PaperPlaneTilt, PencilSimple, Trash,
-    Robot, Brain, MaskHappy, Question
+    Robot, Brain, MaskHappy, Question, PaintBrush
 } from '@phosphor-icons/react';
 
 type LayoutId = NonNullable<PhoneCustomApp['layout']>;
@@ -136,6 +136,15 @@ const getVendorTheme = (name: string, service: AiServiceKind): VendorTheme => {
             userBg: 'linear-gradient(135deg,#34d399,#34d399bb)', userText: '#fff', aiBg: 'rgba(255,255,255,0.07)', aiText: 'rgba(255,255,255,0.9)' };
     }
 };
+
+// 酒馆阅读皮肤：让喜欢素 / 小说风 / 暗色的 user 各取所需。layout: card=楼层卡片，flat=纯文素排
+type TavernStyle = { key: string; label: string; dark: boolean; bg: string; text: string; sub: string; accent: string; font?: string; layout: 'card' | 'flat'; indent?: boolean };
+const TAVERN_STYLES: TavernStyle[] = [
+    { key: 'dark', label: '暗夜', dark: true, bg: 'radial-gradient(140% 90% at 50% 0%, #241319 0%, #120a0f 70%)', text: '#fbe9ef', sub: 'rgba(251,233,239,0.5)', accent: '#fb7185', font: "'Shippori Mincho','Noto Serif SC',serif", layout: 'card' },
+    { key: 'plain', label: '素白', dark: false, bg: '#f7f6f4', text: '#2b2b2b', sub: '#9a9a9a', accent: '#b06a6a', font: "'Noto Sans SC',sans-serif", layout: 'flat' },
+    { key: 'book', label: '书页', dark: false, bg: 'linear-gradient(180deg,#f5efe2,#efe7d6)', text: '#3a3328', sub: '#a89a82', accent: '#a8794a', font: "'Shippori Mincho','Noto Serif SC',serif", layout: 'flat', indent: true },
+    { key: 'midnight', label: '午夜', dark: true, bg: '#0c0d10', text: '#d8dae0', sub: '#6b6f78', accent: '#7c8cff', font: "'Noto Sans SC',sans-serif", layout: 'flat' },
+];
 
 // ============================================================
 //  SHARED PREMIUM UI PIECES
@@ -286,6 +295,9 @@ const CheckPhone: React.FC = () => {
     const [aiMenu, setAiMenu] = useState<{ kind: 'session' | 'card'; id: string } | null>(null);
     const [aiEdit, setAiEdit] = useState<{ kind: 'session' | 'card'; id: string; title?: string; name?: string; emoji?: string; persona?: string; scenario?: string; cardKind?: 'character' | 'world' } | null>(null);
     const [aiCardView, setAiCardView] = useState<string | null>(null); // 点击角色卡：看 TA 用这张玩过哪些
+    const [tavernStyle, setTavernStyle] = useState<string>(() => { try { return localStorage.getItem('cp_tavern_style') || 'dark'; } catch { return 'dark'; } });
+    const [showTavernStyle, setShowTavernStyle] = useState(false); // 酒馆皮肤选择面板
+    useEffect(() => { try { localStorage.setItem('cp_tavern_style', tavernStyle); } catch {} }, [tavernStyle]);
     const lpTimer = useRef<any>(null);
     const lpFired = useRef(false);
     const longPress = (onLong: () => void) => ({
@@ -2134,8 +2146,13 @@ ${olderText}
         const partnerName = isTavern ? (card?.name || s.serviceName) : s.serviceName;
         const partnerEmoji = isTavern ? (card?.emoji || '🎭') : null;
         const inputHint = isTavern ? `以「${partnerName}」身份续写剧情…` : `替 TA 问 ${partnerName}…`;
-        // 厂商皮肤：按 serviceName 换肤（配色 / logo / 气泡 / 明暗）
-        const t = getVendorTheme(s.serviceName, s.service);
+        // 酒馆走用户选的阅读皮肤；助手/树洞走厂商换肤
+        const tStyle = TAVERN_STYLES.find(x => x.key === tavernStyle) || TAVERN_STYLES[0];
+        const t: VendorTheme = isTavern
+            ? { key: 'tavern', label: partnerName, dark: tStyle.dark, bg: tStyle.bg, text: tStyle.text, sub: tStyle.sub, accent: tStyle.accent, font: tStyle.font,
+                userBg: `linear-gradient(135deg,${tStyle.accent},${tStyle.accent}bb)`, userText: '#fff',
+                aiBg: tStyle.dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.04)', aiText: tStyle.text }
+            : getVendorTheme(s.serviceName, s.service);
         const clock = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
         const hairline = t.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
         const inputBg = t.dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
@@ -2187,10 +2204,37 @@ ${olderText}
                             </div>
                         </div>
                     </div>
-                    <button onClick={() => askConfirm({ title: `删除会话「${s.title}」？`, desc: '这段对话记录会被删除，无法撤销。', confirmLabel: '删除', danger: true, onConfirm: () => handleDeleteAiSession(s.id) })} className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition" style={{ color: t.sub }}>
-                        <Trash size={16} />
-                    </button>
+                    <div className="flex items-center">
+                        {isTavern && (
+                            <button onClick={() => setShowTavernStyle(true)} aria-label="阅读皮肤" className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition" style={{ color: t.sub }}>
+                                <PaintBrush size={16} />
+                            </button>
+                        )}
+                        <button onClick={() => askConfirm({ title: `删除会话「${s.title}」？`, desc: '这段对话记录会被删除，无法撤销。', confirmLabel: '删除', danger: true, onConfirm: () => handleDeleteAiSession(s.id) })} className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition" style={{ color: t.sub }}>
+                            <Trash size={16} />
+                        </button>
+                    </div>
                 </div>
+                {/* 酒馆阅读皮肤选择 */}
+                {showTavernStyle && (
+                    <div className="absolute inset-0 z-[80] flex items-end justify-center" onClick={() => setShowTavernStyle(false)}>
+                        <div className="absolute inset-0 bg-black/40" />
+                        <div className="relative w-full max-w-sm m-3 mb-6 rounded-2xl overflow-hidden bg-[#1c1d22] border border-white/10" onClick={e => e.stopPropagation()}>
+                            <div className="px-4 py-2.5 text-[12px] text-white/50 border-b border-white/10">阅读皮肤</div>
+                            <div className="grid grid-cols-2 gap-2 p-3">
+                                {TAVERN_STYLES.map(st => (
+                                    <button key={st.key} onClick={() => { setTavernStyle(st.key); setShowTavernStyle(false); }}
+                                        className={`rounded-xl p-3 text-left border transition ${tavernStyle === st.key ? 'border-white/40' : 'border-white/10'}`}
+                                        style={{ background: st.bg }}>
+                                        <div className="text-[13px] font-semibold" style={{ color: st.text, fontFamily: st.font }}>{st.label}</div>
+                                        <div className="text-[10px] mt-1" style={{ color: st.sub }}>{st.layout === 'card' ? '楼层卡片' : st.indent ? '书页排版' : '素文排版'}</div>
+                                        <div className="mt-1.5 h-1 w-10 rounded-full" style={{ background: st.accent }} />
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                )}
                 {isTavern && card && (
                     <div className="px-4 pt-2 pb-1 shrink-0">
                         <div className="rounded-2xl p-3 flex items-start gap-3" style={{ background: `${t.accent}1a`, border: `1px solid ${hairline}` }}>
@@ -2233,11 +2277,20 @@ ${olderText}
                             )}
                         </div>
                     )}
-                    {/* 酒馆：长剧情小说体「楼层」；玩家(机主)有时会跳出剧情打括号 OOC 调教指令 */}
+                    {/* 酒馆：玩家一层楼 / 角色一层楼 交替。card=楼层卡片，flat=素排/书页。OOC 就是楼层里的括号。 */}
                     {isTavern ? floors.map((f, i) => {
-                        // 酒馆就是「玩家一层楼 / 角色一层楼」交替——OOC 不另起气泡，就是 char 楼层里
-                        // 的括号内容（淡色），可单独成段，也可跟剧情同段（边推剧情边括号提示 AI）。
                         const who = f.isMe ? charName : partnerName;
+                        if (tStyle.layout === 'flat') {
+                            return (
+                                <div key={i} className="px-1 py-1.5">
+                                    <div className="flex items-center gap-1.5 mb-1">
+                                        <span className="text-[12px] font-semibold" style={{ color: f.isMe ? t.accent : t.text }}>{who}</span>
+                                        {f.isMe && <span className="text-[9px]" style={{ color: t.sub }}>· 玩家</span>}
+                                    </div>
+                                    <div className="text-[14px] whitespace-pre-wrap" style={{ color: t.text, lineHeight: 1.95, textIndent: tStyle.indent ? '2em' : undefined }}>{renderProse(f.text)}</div>
+                                </div>
+                            );
+                        }
                         return (
                             <div key={i} className="rounded-2xl p-3.5"
                                 style={{ background: f.isMe ? `${t.accent}10` : 'rgba(255,255,255,0.04)', border: `1px solid ${hairline}` }}>
