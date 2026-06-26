@@ -664,6 +664,10 @@ export interface AiSession {
     transcript: string;
     /** tavern：关联的角色卡 id */
     cardId?: string;
+    /** 长会话自动总结出的「前情提要」（参考 TRPG：超 100 条触发，把旧剧情压成小说梗概） */
+    summaries?: { id: string; content: string; createdAt: number }[];
+    /** 被折叠归档的旧原文（不删除，UI 可展开回看；总结后从 transcript 移到这里） */
+    archived?: string;
     updatedAt: number;
 }
 
@@ -680,6 +684,8 @@ export interface TavernCard {
     emoji: string;
     /** 是否照着用户（查手机的人）捏的——最偷窥感的一项 */
     basedOnUser?: boolean;
+    /** 这张卡照着谁捏的（现实里 TA 在意的某个人的名字）：可能是用户，也可能是 TA 人设/羁绊里更深的某个人 */
+    basedOn?: string;
     createdAt: number;
 }
 

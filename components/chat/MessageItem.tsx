@@ -1829,6 +1829,41 @@ const MessageItem = React.memo(({
         const pc: any = m.metadata?.phoneCard || {};
         const timeStr = new Date(m.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 
+        // 智能体卡片（偷看到 TA 在玩 AI：助手 / 树洞 / 酒馆）
+        if (typeof pc.kind === 'string' && pc.kind.startsWith('ai_')) {
+            const svc = pc.service || pc.kind.replace('ai_', '');
+            const meta: Record<string, { label: string; accent: string; bg: string; glyph: string }> = {
+                assistant: { label: 'AI 助手', accent: '#34d399', bg: 'linear-gradient(150deg,#0e2a22 0%,#0b1f1a 55%,#0a1512 100%)', glyph: '🤖' },
+                claude: { label: '深度对话', accent: '#a78bfa', bg: 'linear-gradient(150deg,#1e1830 0%,#171228 55%,#100c1c 100%)', glyph: '✻' },
+                tavern: { label: '酒馆', accent: '#fb7185', bg: 'linear-gradient(150deg,#2a1620 0%,#1d1018 55%,#130a0f 100%)', glyph: '🎭' },
+            };
+            const mm = meta[svc] || meta.assistant;
+            const card = (
+                <div className="w-64">
+                    <div className="relative rounded-2xl overflow-hidden border shadow-[0_8px_24px_rgba(10,12,20,0.5)]"
+                        style={{ borderColor: `${mm.accent}44`, background: mm.bg }}>
+                        <div className="absolute -top-8 -right-6 w-28 h-28 rounded-full blur-2xl pointer-events-none" style={{ background: `radial-gradient(circle, ${mm.accent}55, transparent 70%)` }} />
+                        <div className="relative px-3 pt-2.5 pb-2 flex items-center gap-2 border-b" style={{ borderColor: `${mm.accent}22` }}>
+                            <span className="w-6 h-6 rounded-lg flex items-center justify-center text-[13px] shrink-0" style={{ background: `${mm.accent}22` }}>{mm.glyph}</span>
+                            <div className="flex-1 min-w-0">
+                                <div className="text-[9px] tracking-[0.22em] font-bold uppercase" style={{ color: mm.accent }}>智能体 · {mm.label}</div>
+                                <div className="text-[12px] text-white/90 font-semibold truncate">{pc.serviceName ? `${pc.serviceName} · ${pc.title || ''}` : (pc.title || '一段对话')}</div>
+                            </div>
+                            <span className="text-[9px] text-white/35 shrink-0">{timeStr}</span>
+                        </div>
+                        <div className="relative px-3 py-2.5">
+                            <p className="text-[12px] leading-[1.7] text-white/65 whitespace-pre-wrap max-h-40 overflow-y-auto no-scrollbar">{pc.detail || ''}</p>
+                        </div>
+                        <div className="relative px-3 py-1.5 border-t flex items-center justify-between" style={{ borderColor: `${mm.accent}1e` }}>
+                            <span className="text-[9px] italic text-white/35">TA 自己手机上的 AI</span>
+                            <span className="text-[9px] font-bold tracking-wide" style={{ color: mm.accent }}>来自查手机</span>
+                        </div>
+                    </div>
+                </div>
+            );
+            return commonLayout(card);
+        }
+
         // 人际关系变动卡片（用户在查手机里删/拉黑了角色的好友）
         if (pc.kind === 'relationship') {
             const isBlock = pc.action === 'blocked';
