@@ -190,11 +190,15 @@ export function normalizeMessageContent(
     if (type === 'theater_card') {
         const t: any = msg.metadata?.theater || {};
         const meta: any = msg.metadata || {};
+        const exposed = meta.exposed !== false; // 缺省按已暴露处理（兼容旧卡片）
         const beat = Array.isArray(t.lines)
             ? t.lines.map((l: any) => `· ${typeof l?.text === 'string' ? l.text : ''}`).filter((s: string) => s.length > 2).join('\n')
             : '';
         const head = `[小剧场·窥视] ${userName}悄悄看了${charName}在 ${meta.slotTime || ''}「${meta.activity || '某个时段'}」时的样子`;
-        if (beat) return `${head}\n${charName}当时的画面：\n${beat}\n（${charName}意识到自己被${userName}看到了。）`;
+        const tail = exposed
+            ? `（${charName}意识到自己被${userName}看到了。）`
+            : `（这是${charName}当时真实在做的事，${charName}自己记得；但${charName}并不知道被${userName}看到。）`;
+        if (beat) return `${head}\n${charName}当时的画面：\n${beat}\n${tail}`;
         return head;
     }
 

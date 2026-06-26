@@ -167,7 +167,8 @@ export async function generateSlotTheater(
                 model: apiConfig.model,
                 messages: [{ role: 'user', content: prompt }],
                 temperature: 0.9,
-                max_tokens: 2600,
+                // 12–18 行、每行可写得有质感，2600 容易把最后一拍截断；放宽到 4600 留足尾巴。
+                max_tokens: 4600,
             }),
         });
 

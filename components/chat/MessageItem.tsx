@@ -1906,6 +1906,7 @@ const MessageItem = React.memo(({
         const timeStr = new Date(m.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
         const HUE = 262;
         const accent = `hsl(${HUE},75%,72%)`;
+        const exposed = tMeta.exposed !== false; // 缺省按已暴露（兼容旧卡片）
         // 由该时段起始时间，给每一拍合成「行为轨迹」时间戳（HH:MM:SS），与窥视面板一致。
         const beatClock = (idx: number): string => {
             const [h, mm] = String(tMeta.slotTime || '00:00').split(':').map((n: string) => parseInt(n, 10));
@@ -1916,7 +1917,7 @@ const MessageItem = React.memo(({
         const card = (
             <div className="w-64">
                 <div className="relative rounded-2xl overflow-hidden border shadow-[0_8px_28px_rgba(30,18,48,0.5)]"
-                    style={{ borderColor: `hsla(${HUE},55%,55%,0.32)`, background: `linear-gradient(160deg,hsl(${HUE},42%,15%) 0%,hsl(${HUE},45%,9%) 58%,#0a0712 100%)` }}>
+                    style={{ borderColor: `hsla(${HUE},55%,55%,0.32)`, background: `linear-gradient(160deg,hsl(${HUE},38%,20%) 0%,hsl(${HUE},42%,13%) 58%,#0f0a18 100%)` }}>
                     <div className="absolute -top-7 -right-5 w-24 h-24 rounded-full pointer-events-none" style={{ background: `radial-gradient(circle,hsla(${HUE},70%,60%,.35),transparent 70%)` }} />
                     <div className="absolute inset-0 pointer-events-none opacity-50" style={{ backgroundImage: 'radial-gradient(1px 1px at 22% 30%,rgba(200,180,255,.4),transparent),radial-gradient(1px 1px at 78% 18%,rgba(220,200,255,.35),transparent)' }} />
                     {/* 头部：窥视回放 · LIVE */}
@@ -1938,11 +1939,13 @@ const MessageItem = React.memo(({
                                 <span className="flex-shrink-0 w-[42px] pt-1 text-right text-[8px] font-mono leading-tight whitespace-nowrap text-white/28 select-none">{beatClock(i)}</span>
                                 <span
                                     className="flex-shrink-0 self-start mt-0.5 w-5 h-5 rounded-md flex items-center justify-center text-[11px]"
-                                    style={{ background: `hsl(${HUE},40%,22%)`, border: `1px solid hsla(${HUE},55%,50%,0.3)` }}
+                                    style={{ background: `hsl(${HUE},42%,30%)`, border: `1px solid hsla(${HUE},60%,58%,0.45)` }}
                                 >
                                     {l?.emotion || '·'}
                                 </span>
-                                <p className="flex-1 min-w-0 text-[12px] leading-[1.55] text-white/74 whitespace-pre-wrap break-words">{l?.text || ''}</p>
+                                <p
+                                    className={`flex-1 min-w-0 text-[12.5px] leading-[1.55] whitespace-pre-wrap break-words ${/[「」“”"]/.test(l?.text || '') ? 'text-white font-medium' : 'text-white/90'}`}
+                                >{l?.text || ''}</p>
                             </div>
                         )) : (
                             <p className="text-[11px] text-white/40 italic">（这段窥视没有内容）</p>
@@ -1950,8 +1953,10 @@ const MessageItem = React.memo(({
                     </div>
                     {/* 页脚 */}
                     <div className="relative px-3 py-1.5 border-t flex items-center justify-between" style={{ borderColor: `hsla(${HUE},55%,55%,0.2)` }}>
-                        <span className="text-[9px] italic text-white/35">你偷看了 TA 的这一刻</span>
-                        <span className="text-[9px] font-bold tracking-wide" style={{ color: accent }}>TA 已察觉</span>
+                        <span className="text-[9px] italic text-white/40">你偷看了 TA 的这一刻</span>
+                        <span className="text-[9px] font-bold tracking-wide" style={{ color: exposed ? accent : 'rgba(255,255,255,0.4)' }}>
+                            {exposed ? 'TA 已察觉' : 'TA 不知情'}
+                        </span>
                     </div>
                 </div>
             </div>

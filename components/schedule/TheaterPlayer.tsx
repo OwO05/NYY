@@ -8,7 +8,9 @@ interface TheaterPlayerProps {
     lines: TheaterLine[] | null;   // null / 空 = 还在生成
     isGenerating: boolean;
     onReplay: () => void;          // 重演（重新生成）
-    onSendCard?: () => void;       // 「让 TA 发现你在偷看」：把这段演出作为卡片发到聊天，角色会察觉被偷看
+    // 把这段演出作为卡片留痕到聊天。两态都留痕、角色都知道自己干了啥；
+    // exposed=true → TA 会发现你在偷看；exposed=false → TA 不知道你看了。
+    onSendCard?: (exposed: boolean) => void;
     onClose: () => void;
 }
 
@@ -281,37 +283,42 @@ const TheaterPlayer: React.FC<TheaterPlayerProps> = ({
                         </div>
                     ) : (
                         <div className="flex flex-col items-center gap-2.5">
-                            {/* 主按钮：照抄截图「深入窥视」造型 —— 这里的动作是把这一刻甩到 TA 面前 */}
+                            {/* 换一段重演 */}
+                            <button
+                                onClick={onReplay}
+                                className="text-[11px] font-bold text-white/50 hover:text-white/85 transition-colors active:scale-95"
+                            >
+                                ↻ 换一段重演
+                            </button>
+                            {/* 两态都把这一刻「留痕」进聊天，角色都记得自己干了啥；
+                                区别只在 TA 知不知道你看了。主按钮=暴露，次按钮=不暴露。 */}
                             {onSendCard && (
-                                <button
-                                    onClick={onSendCard}
-                                    className="w-full max-w-[300px] rounded-2xl py-3 px-5 flex flex-col items-center transition-all active:scale-[0.98]"
-                                    style={{
-                                        background: `linear-gradient(135deg, hsl(${HUE},70%,58%), hsl(${HUE+18},65%,50%))`,
-                                        boxShadow: `0 8px 28px hsla(${HUE},70%,45%,0.45), inset 0 1px 0 rgba(255,255,255,0.25)`,
-                                    }}
-                                >
-                                    <span className="text-[15px] font-black text-white tracking-wide flex items-center gap-1.5">
-                                        <span>✦</span>让 TA 发现你在偷看
-                                    </span>
-                                    <span className="text-[10px] font-medium text-white/75 mt-0.5">把这一帧甩到 TA 面前 · TA 会当场察觉</span>
-                                </button>
+                                <div className="w-full max-w-[320px] flex items-stretch gap-2.5">
+                                    <button
+                                        onClick={() => onSendCard(false)}
+                                        className="flex-1 rounded-2xl py-2.5 px-3 flex flex-col items-center border transition-all active:scale-[0.98]"
+                                        style={{ borderColor: `hsla(${HUE},50%,60%,0.4)`, background: `hsla(${HUE},40%,18%,0.6)` }}
+                                    >
+                                        <span className="text-[13px] font-black text-white/90 flex items-center gap-1">
+                                            <span>🙈</span>TA 不知道你看了
+                                        </span>
+                                        <span className="text-[9px] font-medium text-white/45 mt-0.5">悄悄留痕 · TA 没发现被看</span>
+                                    </button>
+                                    <button
+                                        onClick={() => onSendCard(true)}
+                                        className="flex-1 rounded-2xl py-2.5 px-3 flex flex-col items-center transition-all active:scale-[0.98]"
+                                        style={{
+                                            background: `linear-gradient(135deg, hsl(${HUE},70%,58%), hsl(${HUE+18},65%,50%))`,
+                                            boxShadow: `0 8px 24px hsla(${HUE},70%,45%,0.4), inset 0 1px 0 rgba(255,255,255,0.25)`,
+                                        }}
+                                    >
+                                        <span className="text-[13px] font-black text-white flex items-center gap-1">
+                                            <span>✦</span>让 TA 发现你在看
+                                        </span>
+                                        <span className="text-[9px] font-medium text-white/75 mt-0.5">甩到 TA 面前 · TA 会察觉</span>
+                                    </button>
+                                </div>
                             )}
-                            {/* 次级：重演 + 悄悄退出（点明「不发送」= TA 永远不会知道） */}
-                            <div className="flex items-center gap-5">
-                                <button
-                                    onClick={onReplay}
-                                    className="text-[11px] font-bold text-white/55 hover:text-white/85 transition-colors active:scale-95"
-                                >
-                                    ↻ 换一段重演
-                                </button>
-                                <button
-                                    onClick={onClose}
-                                    className="text-[11px] font-bold text-white/40 hover:text-white/70 transition-colors active:scale-95"
-                                >
-                                    悄悄看过就好 · TA 不会知道 →
-                                </button>
-                            </div>
                         </div>
                     )
                 )}
