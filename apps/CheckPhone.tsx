@@ -171,6 +171,8 @@ const CheckPhone: React.FC = () => {
     const askConfirm = (opts: { title: string; desc?: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void }) => setConfirmState(opts);
     // Messages 详情：长 transcript 默认只渲染最新 50 行，其余折叠
     const [transcriptExpanded, setTranscriptExpanded] = useState(false);
+    // 联系人详情的对话预览同样：超 50 条折叠，点开看更早
+    const [convExpanded, setConvExpanded] = useState(false);
 
     // Swipe tracking for paging
     const touchStartX = useRef<number | null>(null);
@@ -1217,7 +1219,7 @@ ${layoutHint[layout || 'generic']}`;
                         const dimmed = c.status === 'deleted' || c.status === 'blocked';
                         const av = contactAvatar(c);
                         return (
-                            <div key={c.id} onClick={() => { setSelectedContact(c); setNoteDraft(c.note || ''); setEditingNote(false); setActiveAppId('contact_detail'); }}
+                            <div key={c.id} onClick={() => { setSelectedContact(c); setNoteDraft(c.note || ''); setEditingNote(false); setConvExpanded(false); setActiveAppId('contact_detail'); }}
                                 className={`group relative flex items-center gap-3.5 rounded-2xl p-3.5 bg-white/[0.035] border border-white/[0.06] active:scale-[0.99] transition cursor-pointer animate-fade-in ${dimmed ? 'opacity-45' : ''}`}>
                                 {av ? (
                                     <img src={av} alt="" className="w-12 h-12 rounded-2xl object-cover shrink-0" />
@@ -1307,18 +1309,29 @@ ${layoutHint[layout || 'generic']}`;
                         )}
                     </div>
 
-                    {/* 对话预览 */}
-                    {parsed.length > 0 && (
-                        <div className="rounded-2xl p-3 bg-white/[0.025] border border-white/[0.06] space-y-2.5">
-                            {parsed.slice(-12).map((m, i) => (
-                                <div key={i} className={`flex items-end gap-2 ${m.isMe ? 'justify-end' : 'justify-start'}`}>
-                                    {!m.isMe && av && <img src={av} alt="" className="w-6 h-6 rounded-lg object-cover shrink-0" />}
-                                    <div className={`px-3 py-2 rounded-2xl max-w-[78%] text-[12.5px] leading-relaxed break-words ${m.isMe ? 'text-white rounded-br-md' : 'bg-white/[0.07] text-white/90 border border-white/[0.06] rounded-bl-md'}`}
-                                        style={m.isMe ? { background: `linear-gradient(135deg, ${accent}, ${accent}bb)` } : undefined}>{m.content}</div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
+                    {/* 对话预览：超过 50 条默认折叠，点「展开更早的」才显示之前的记录 */}
+                    {parsed.length > 0 && (() => {
+                        const CAP = 50;
+                        const hidden = convExpanded ? 0 : Math.max(0, parsed.length - CAP);
+                        const shown = hidden > 0 ? parsed.slice(-CAP) : parsed;
+                        return (
+                            <div className="rounded-2xl p-3 bg-white/[0.025] border border-white/[0.06] space-y-2.5">
+                                {hidden > 0 && (
+                                    <button onClick={() => setConvExpanded(true)}
+                                        className="w-full py-2 rounded-xl text-[11.5px] font-semibold text-white/55 bg-white/[0.04] border border-white/[0.07] active:scale-[0.99] transition">
+                                        ▲ 展开更早的 {hidden} 条消息
+                                    </button>
+                                )}
+                                {shown.map((m, i) => (
+                                    <div key={i} className={`flex items-end gap-2 ${m.isMe ? 'justify-end' : 'justify-start'}`}>
+                                        {!m.isMe && av && <img src={av} alt="" className="w-6 h-6 rounded-lg object-cover shrink-0" />}
+                                        <div className={`px-3 py-2 rounded-2xl max-w-[78%] text-[12.5px] leading-relaxed break-words ${m.isMe ? 'text-white rounded-br-md' : 'bg-white/[0.07] text-white/90 border border-white/[0.06] rounded-bl-md'}`}
+                                            style={m.isMe ? { background: `linear-gradient(135deg, ${accent}, ${accent}bb)` } : undefined}>{m.content}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        );
+                    })()}
 
                     {isLoading && (
                         <div className="flex justify-center py-3">
