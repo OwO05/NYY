@@ -18,7 +18,7 @@
  * prompt（peek 旧版手搓 mapper 的问题即在此，已统一修掉）。
  */
 
-import { CharacterProfile, UserProfile, Message, Emoji, DateStyleConfig, DateObservation } from '../types';
+import { CharacterProfile, UserProfile, Message, Emoji, DateStyleConfig, DateObservation, DateObserveConfig, DateObserveCustomField } from '../types';
 import { ContextBuilder } from './context';
 import { ChatPrompts } from './chatPrompts';
 import { injectMemoryPalace } from './memoryPalace/pipeline';
@@ -275,8 +275,11 @@ const isObserveMarkerLine = (line: string): boolean => OBSERVE_MARKER_LINE_RE.te
 /** 单条字段行：容忍 markdown 列表符 / 加粗 / 中英 key / 全半角竖线 / 中英冒号 */
 const OBSERVE_FIELD_RE = /^\s*(?:[-*>•·]\s*)?\*{0,2}\s*(时间|地点|地区|场所|位置|状态|心境|情绪|细节|动作|举动|time|place|location|site|position|status|state|mood|detail|trace|action)\s*\*{0,2}\s*[｜|:：]\s*(.+?)\s*$/i;
 
+/** 默认四维的 key（不含 extra） */
+type ObserveDefaultKey = 'time' | 'place' | 'state' | 'detail';
+
 /** 把 key 归一到四个维度之一 */
-const mapObserveKey = (key: string): keyof DateObservation | null => {
+const mapObserveKey = (key: string): ObserveDefaultKey | null => {
     const k = key.toLowerCase();
     if (/时间|time/.test(k)) return 'time';
     if (/地点|地区|场所|位置|place|location|site|position/.test(k)) return 'place';
@@ -317,19 +320,44 @@ export const OBSERVE_DIMENSIONS: ObserveDimension[] = [
     { key: 'detail', label: '细节', en: 'TRACE', glyph: '✶', hint: '此刻最值得被注意的一个动作 / 微小细节' },
 ];
 
-/** HUD / 设置面板用：合并默认 + 角色自定义，过滤掉被禁用的维度；display = HUD 标签（可自定义） */
-export interface ResolvedObserveField extends ObserveDimension {
-    display: string;
+/** 自定义维度在 HUD 上轮换用的字形 */
+const CUSTOM_GLYPHS = ['✦', '◆', '❂', '✺', '⬡', '◈'];
+
+/** HUD / 设置面板 / 提示词共用：合并默认四维 + 用户自定义维度，过滤禁用 / 空标签的。 */
+export interface ResolvedObserveField {
+    key: string;       // 默认维度的 key（time/place/...）或自定义维度的 id
+    label: string;     // 线格式字段名（默认维度用固定中文 key；自定义用其 label）
+    display: string;   // HUD 展示标签（默认维度可自定义；自定义维度即 label）
+    en: string;
+    glyph: string;
+    hint: string;
+    isCustom: boolean;
 }
-export const resolveObserveFields = (char: CharacterProfile): ResolvedObserveField[] => {
-    const cfg = char.dateObserve?.fields || {};
-    return OBSERVE_DIMENSIONS
+export const resolveObserveFields = (config?: DateObserveConfig, charName = ''): ResolvedObserveField[] => {
+    const cfg = config?.fields || {};
+    const base: ResolvedObserveField[] = OBSERVE_DIMENSIONS
         .filter(d => cfg[d.key]?.enabled !== false)
         .map(d => ({
-            ...d,
+            key: d.key,
+            label: d.label,
             display: (cfg[d.key]?.label || '').trim() || d.label,
-            hint: ((cfg[d.key]?.hint || '').trim() || d.hint).replace(/\{name\}/g, char.name),
+            en: d.en,
+            glyph: d.glyph,
+            hint: ((cfg[d.key]?.hint || '').trim() || d.hint).replace(/\{name\}/g, charName),
+            isCustom: false,
         }));
+    const custom: ResolvedObserveField[] = (config?.custom || [])
+        .filter(c => c.enabled !== false && (c.label || '').trim())
+        .map((c, i) => ({
+            key: c.id,
+            label: c.label.trim(),
+            display: c.label.trim(),
+            en: 'NOTE',
+            glyph: CUSTOM_GLYPHS[i % CUSTOM_GLYPHS.length],
+            hint: ((c.hint || '').trim() || `观察并描写「${c.label.trim()}」`).replace(/\{name\}/g, charName),
+            isCustom: true,
+        }));
+    return [...base, ...custom];
 };
 
 /**
@@ -338,7 +366,7 @@ export const resolveObserveFields = (char: CharacterProfile): ResolvedObserveFie
  * 全部维度被用户关掉时返回空串（等于不注入观测块）。
  */
 const buildObserveBlock = (char: CharacterProfile): string => {
-    const fields = resolveObserveFields(char);
+    const fields = resolveObserveFields(char.dateObserve, char.name);
     if (fields.length === 0) return '';
     const lines = fields.map(f => `${f.label}｜（${f.hint}）`).join('\n');
     return `
@@ -369,14 +397,16 @@ ${OBSERVE_CLOSE}
  */
 export const extractObservation = (
     text: string,
-    opts: { lenient?: boolean } = {},
+    opts: { lenient?: boolean; custom?: DateObserveCustomField[] } = {},
 ): { observation: DateObservation | null; rest: string } => {
     if (!text) return { observation: null, rest: text };
+
+    const customFields = (opts.custom || []).filter(c => c.enabled !== false && (c.label || '').trim());
 
     // ── 严格层：成对定界块 ──
     const m = text.match(OBSERVE_BLOCK_RE);
     if (m && m.index !== undefined) {
-        const observation = parseObserveBody(m[1]);
+        const observation = parseObserveBody(m[1], customFields);
         if (hasObservation(observation)) {
             const rest = stripStrayMarkers(text.slice(0, m.index) + text.slice(m.index + m[0].length));
             return { observation, rest };
@@ -385,22 +415,50 @@ export const extractObservation = (
 
     // ── 回退层：仅在开关开时启用，扫开头的连续字段行 ──
     if (opts.lenient) {
-        const fallback = scanLeadingFields(text);
+        const fallback = scanLeadingFields(text, customFields);
         if (fallback) return fallback;
     }
 
     return { observation: null, rest: text };
 };
 
+/** 通用字段行（任意短 key｜value），用于匹配自定义维度的 label */
+const OBSERVE_ANYLINE_RE = /^\s*(?:[-*>•·]\s*)?\*{0,2}\s*([^｜|:：*\n]{1,16}?)\s*\*{0,2}\s*[｜|:：]\s*(.+?)\s*$/;
+
+/** 试着把一行匹配成某个自定义维度（按 label 精确匹配，大小写/空格不敏感） */
+const matchCustomField = (line: string, customFields: DateObserveCustomField[]): { id: string; value: string } | null => {
+    if (!customFields.length) return null;
+    const mm = line.match(OBSERVE_ANYLINE_RE);
+    if (!mm) return null;
+    const k = mm[1].trim().toLowerCase();
+    const cf = customFields.find(c => c.label.trim().toLowerCase() === k);
+    if (!cf) return null;
+    return { id: cf.id, value: cleanObserveValue(mm[2]) };
+};
+
+const setCustomValue = (obs: DateObservation, id: string, val: string): void => {
+    if (!val) return;
+    obs.extra = obs.extra || {};
+    if (!obs.extra[id]) obs.extra[id] = val;
+};
+
+/** 统计观测命中了几个不同维度（默认四维 + 自定义），回退层用于 ≥2 门槛 */
+const countObserveDims = (obs: DateObservation): number =>
+    (obs.time ? 1 : 0) + (obs.place ? 1 : 0) + (obs.state ? 1 : 0) + (obs.detail ? 1 : 0) + Object.keys(obs.extra || {}).length;
+
 /** 块体逐行解析（严格层用，块内字段无歧义，不设 2 个门槛） */
-const parseObserveBody = (body: string): DateObservation => {
+const parseObserveBody = (body: string, customFields: DateObserveCustomField[] = []): DateObservation => {
     const obs: DateObservation = {};
     for (const raw of body.split('\n')) {
         const mm = raw.match(OBSERVE_FIELD_RE);
-        if (!mm) continue;
-        const key = mapObserveKey(mm[1]);
-        const val = cleanObserveValue(mm[2]);
-        if (key && val && !obs[key]) obs[key] = val;
+        if (mm) {
+            const key = mapObserveKey(mm[1]);
+            const val = cleanObserveValue(mm[2]);
+            if (key && val && !obs[key]) obs[key] = val;
+            continue;
+        }
+        const cf = matchCustomField(raw, customFields);
+        if (cf) setCustomValue(obs, cf.id, cf.value);
     }
     return obs;
 };
@@ -409,7 +467,7 @@ const parseObserveBody = (body: string): DateObservation => {
  * 回退扫描：跳过开头的空行/孤立标记行，连续吃字段行，遇到第一行"非字段非标记非空"的
  * 内容（正文/台词/[emotion] 行）即停。命中 ≥2 个不同维度才算数。
  */
-const scanLeadingFields = (text: string): { observation: DateObservation; rest: string } | null => {
+const scanLeadingFields = (text: string, customFields: DateObserveCustomField[] = []): { observation: DateObservation; rest: string } | null => {
     const lines = text.split('\n');
     let i = 0;
     while (i < lines.length && !lines[i].trim()) i++;          // 跳开头空行
@@ -422,14 +480,19 @@ const scanLeadingFields = (text: string): { observation: DateObservation; rest: 
         if (!t) { continue; }                       // 字段间空行：跳过但不推进 lastConsumed
         if (isObserveMarkerLine(lines[j])) { lastConsumed = j; continue; } // 闭合/重复标记
         const mm = t.match(OBSERVE_FIELD_RE);
-        if (!mm) break;                             // 正文开始
-        const key = mapObserveKey(mm[1]);
-        const val = cleanObserveValue(mm[2]);
-        if (key && val && !obs[key]) obs[key] = val;
+        if (mm) {
+            const key = mapObserveKey(mm[1]);
+            const val = cleanObserveValue(mm[2]);
+            if (key && val && !obs[key]) obs[key] = val;
+            lastConsumed = j;
+            continue;
+        }
+        const cf = matchCustomField(t, customFields);
+        if (!cf) break;                             // 正文开始
+        setCustomValue(obs, cf.id, cf.value);
         lastConsumed = j;
     }
-    const count = (obs.time ? 1 : 0) + (obs.place ? 1 : 0) + (obs.state ? 1 : 0) + (obs.detail ? 1 : 0);
-    if (count < 2) return null;
+    if (countObserveDims(obs) < 2) return null;
     const rest = lines.slice(lastConsumed + 1).join('\n').trim();
     return { observation: obs, rest };
 };
@@ -446,9 +509,9 @@ const stripStrayMarkers = (text: string): string =>
 export const stripObservation = (text: string, opts?: { lenient?: boolean }): string =>
     extractObservation(text, opts).rest || (text || '');
 
-/** HUD / 持久化判定：四个字段至少有一个非空才算有效观测 */
+/** HUD / 持久化判定：任一默认维度或自定义维度非空才算有效观测 */
 export const hasObservation = (obs: DateObservation | null | undefined): obs is DateObservation =>
-    !!obs && !!(obs.time || obs.place || obs.state || obs.detail);
+    !!obs && !!(obs.time || obs.place || obs.state || obs.detail || (obs.extra && Object.keys(obs.extra).length > 0));
 
 const getDateEmotions = (char: CharacterProfile): string[] =>
     [...REQUIRED_DATE_EMOTIONS, ...(char.customDateSprites || [])];

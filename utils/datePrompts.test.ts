@@ -173,11 +173,60 @@ ${OBSERVE_CLOSE}`;
         const char = makeChar({ name: '阿狸', dateObserve: { enabled: true, fields: {
             place: { label: '坐标' }, detail: { enabled: false },
         } } });
-        const fields = resolveObserveFields(char);
+        const fields = resolveObserveFields(char.dateObserve, char.name);
         expect(fields.map(f => f.key)).toEqual(['time', 'place', 'state']); // detail 被过滤
         expect(fields.find(f => f.key === 'place')!.display).toBe('坐标');   // 自定义展示标签
         expect(fields.find(f => f.key === 'place')!.label).toBe('地点');     // 线格式字段名不变
         expect(fields.find(f => f.key === 'place')!.hint).toContain('阿狸'); // {name} 已替换
+    });
+
+    it('追加自定义维度：hint 进提示词、label 进线格式与硬性要求', async () => {
+        const { messages } = await DatePrompts.buildSessionPayload({
+            char: makeChar({ dateObserve: {
+                enabled: true,
+                custom: [{ id: 'c1', label: '穿着', hint: '今天穿了什么、整不整齐', enabled: true }],
+            } }),
+            userProfile: user, allMsgs: [makeMsg({ role: 'assistant', content: '[normal] 开场' }), makeMsg({ content: 'hi' })],
+            emojis: [], userText: 'hi', variant: 'send',
+        });
+        const sys = sysOf(messages);
+        expect(sys).toContain('穿着｜');
+        expect(sys).toContain('今天穿了什么、整不整齐');
+        expect(sys).toContain('「穿着」'); // 出现在「标签必须原样用」清单里
+    });
+
+    it('extractObservation 解析自定义维度到 extra（需传 custom）', () => {
+        const fields = [{ id: 'c1', label: '穿着', enabled: true }];
+        const full = `${OBSERVE_OPEN}\n时间｜黄昏\n地点｜天台\n穿着｜松垮的灰色卫衣\n${OBSERVE_CLOSE}\n[normal] 嗨。`;
+        const { observation, rest } = extractObservation(full, { custom: fields });
+        expect(observation!.time).toBe('黄昏');
+        expect(observation!.extra?.c1).toBe('松垮的灰色卫衣');
+        expect(rest).toBe('[normal] 嗨。');
+        // 不传 custom 时，自定义行不会被解析成字段（留在 rest 或被忽略）
+        const noCustom = extractObservation(full);
+        expect(noCustom.observation!.extra?.c1).toBeUndefined();
+    });
+
+    it('回退层也能吃自定义维度（凑够 2 个维度）', () => {
+        const fields = [{ id: 'c1', label: '天气', enabled: true }];
+        const t = `天气｜下着小雨\n状态｜缩着脖子\n[normal] 快进来。`;
+        const { observation, rest } = extractObservation(t, { lenient: true, custom: fields });
+        expect(observation!.extra?.c1).toBe('下着小雨');
+        expect(observation!.state).toBe('缩着脖子');
+        expect(rest).toBe('[normal] 快进来。');
+    });
+
+    it('禁用 / 空标签的自定义维度不参与注入与解析', async () => {
+        const char = makeChar({ dateObserve: { enabled: true, custom: [
+            { id: 'c1', label: '穿着', enabled: false },
+            { id: 'c2', label: '', enabled: true },
+        ] } });
+        const { messages } = await DatePrompts.buildSessionPayload({
+            char, userProfile: user, allMsgs: [makeMsg({ role: 'assistant', content: '[normal] 开场' }), makeMsg({ content: 'hi' })],
+            emojis: [], userText: 'hi', variant: 'send',
+        });
+        expect(sysOf(messages)).not.toContain('穿着｜');
+        expect(resolveObserveFields(char.dateObserve, char.name).filter(f => f.isCustom)).toHaveLength(0);
     });
 
     it('extractObservation 解析四字段并剥出正文', () => {

@@ -373,7 +373,7 @@ const DateSession: React.FC<DateSessionProps> = ({
             
             // Parse Peek Status as opening — 先剥出观测块（开了 OBSERVE 才有）
             const startText = peekStatus || "Waiting for connection...";
-            const { observation: peekObs, rest: peekRest } = extractObservation(startText, { lenient: observeEnabled });
+            const { observation: peekObs, rest: peekRest } = extractObservation(startText, { lenient: observeEnabled, custom: char.dateObserve?.custom });
             if (hasObservation(peekObs)) setObservation(peekObs);
             const items = parseDialogue(peekRest, 'normal');
             setDialogueBatch(items);
@@ -508,7 +508,7 @@ const DateSession: React.FC<DateSessionProps> = ({
         try {
             const aiContent = await onSendMessage(text);
             // 先剥出观测块更新 HUD，再解析剩余正文
-            const { observation: obs, rest } = extractObservation(aiContent, { lenient: observeEnabled });
+            const { observation: obs, rest } = extractObservation(aiContent, { lenient: observeEnabled, custom: char.dateObserve?.custom });
             if (hasObservation(obs)) setObservation(obs);
             const items = parseDialogue(rest, 'normal');
             setDialogueBatch(items);
@@ -530,7 +530,7 @@ const DateSession: React.FC<DateSessionProps> = ({
         setIsTyping(true);
         try {
             const aiContent = await onReroll();
-            const { observation: obs, rest } = extractObservation(aiContent, { lenient: observeEnabled });
+            const { observation: obs, rest } = extractObservation(aiContent, { lenient: observeEnabled, custom: char.dateObserve?.custom });
             if (hasObservation(obs)) setObservation(obs);
             const items = parseDialogue(rest, 'normal');
             setDialogueBatch(items);
@@ -802,7 +802,7 @@ const DateSession: React.FC<DateSessionProps> = ({
                                 </div>
                             )}
                             {sessionMessages.length === 0 && peekStatus && (() => {
-                                const { observation: peekObs, rest: peekBody } = extractObservation(peekStatus, { lenient: observeEnabled });
+                                const { observation: peekObs, rest: peekBody } = extractObservation(peekStatus, { lenient: observeEnabled, custom: char.dateObserve?.custom });
                                 return (
                                     <>
                                         {observeEnabled && hasObservation(peekObs) && (
@@ -841,7 +841,7 @@ const DateSession: React.FC<DateSessionProps> = ({
                                         <p className={`whitespace-pre-wrap font-serif text-[16px] text-right leading-loose tracking-wide italic pr-4 ${char.dateLightReading ? 'text-stone-400 border-r-2 border-stone-300/50' : 'text-slate-400 border-r-2 border-slate-600/50'}`}>{cleanTextForDisplay(msg.content)} <span className="text-[10px] uppercase font-sans not-italic ml-2 opacity-50">{userProfile.name}</span></p>
                                     ) : (() => {
                                         // 观测协议：从这条回复里剥出观测块，正文上方渲染独立卡片，正文本身不显示块文本
-                                        const { observation: msgObs, rest: msgBody } = extractObservation(msg.content || '', { lenient: observeEnabled });
+                                        const { observation: msgObs, rest: msgBody } = extractObservation(msg.content || '', { lenient: observeEnabled, custom: char.dateObserve?.custom });
                                         return (
                                         <div>
                                             {observeEnabled && hasObservation(msgObs) && (

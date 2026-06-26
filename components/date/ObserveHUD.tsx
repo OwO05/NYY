@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { DateObservation, DateObserveConfig, DateObserveStyleId } from '../../types';
-import { OBSERVE_DIMENSIONS } from '../../utils/datePrompts';
+import { resolveObserveFields } from '../../utils/datePrompts';
 
 /**
  * 「观测协议 OBSERVE」观测面板。把 char 此刻的 时间 / 地点 / 状态 / 细节 摊开给用户看。
@@ -182,16 +182,17 @@ const THEMES: Record<DateObserveStyleId, Theme> = {
 
 const getTheme = (id?: DateObserveStyleId): Theme => THEMES[id || 'hologram'] || THEMES.hologram;
 
-/** 合并默认维度 + 自定义展示标签，按字段顺序产出渲染行（仅保留有值的） */
-const buildRows = (observation: DateObservation, config?: DateObserveConfig) =>
-    OBSERVE_DIMENSIONS
-        .filter(d => config?.fields?.[d.key]?.enabled !== false)
-        .map(d => ({
-            key: d.key,
-            glyph: d.glyph,
-            en: d.en,
-            cn: (config?.fields?.[d.key]?.label || '').trim() || d.label,
-            value: (observation[d.key] || '').trim(),
+/** 合并默认维度 + 自定义维度，按字段顺序产出渲染行（仅保留有值的） */
+const buildRows = (observation: DateObservation, config?: DateObserveConfig, charName = '') =>
+    resolveObserveFields(config, charName)
+        .map(f => ({
+            key: f.key,
+            glyph: f.glyph,
+            en: f.en,
+            cn: f.display,
+            value: (f.isCustom
+                ? (observation.extra?.[f.key] || '')
+                : ((observation[f.key as keyof DateObservation] as string) || '')).trim(),
         }))
         .filter(r => r.value);
 
@@ -237,7 +238,7 @@ const ObserveHUD: React.FC<ObserveHUDProps> = ({ observation, variant = 'hud', c
     const [expanded, setExpanded] = useState(false); // 独立全屏查看
 
     const theme = getTheme(config?.style);
-    const rows = buildRows(observation, config);
+    const rows = buildRows(observation, config, charName);
     if (rows.length === 0) return null;
 
     const stop = (e: React.MouseEvent) => e.stopPropagation();

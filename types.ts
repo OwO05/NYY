@@ -1562,6 +1562,19 @@ export interface DateObservation {
     state?: string;
     /** 细节：正在发生的动作 / 微小细节 */
     detail?: string;
+    /** 用户追加的自定义维度的值，按 DateObserveCustomField.id 存 */
+    extra?: Record<string, string>;
+}
+
+/**
+ * 观测协议追加的自定义维度（在 时间/地点/状态/细节 之外另开一格）。
+ * label 同时是「线格式字段名」和「HUD 标签」——解析时按 label 匹配回该维度。
+ */
+export interface DateObserveCustomField {
+    id: string;        // 稳定 id，作为 DateObservation.extra 的 key
+    label: string;     // 字段名 / HUD 标签（如「天气」「穿着」）
+    hint?: string;     // 生成提示：这一格写什么
+    enabled?: boolean; // 默认 true
 }
 
 /** 观测协议 OBSERVE 的 HUD 视觉样式 id */
@@ -1588,6 +1601,8 @@ export interface DateObserveConfig {
     style?: DateObserveStyleId;
     /** 四个维度的标签 / 提示自定义；不填回落默认值 */
     fields?: Partial<Record<keyof DateObservation, DateObserveFieldConfig>>;
+    /** 用户追加的自定义维度（在四个默认维度之外） */
+    custom?: DateObserveCustomField[];
 }
 
 export interface DateState {

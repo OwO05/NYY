@@ -10,13 +10,17 @@
 
 ## 数据模型（`types.ts`）
 
-- `DateObservation`：`{ time?, place?, state?, detail? }`，四个字段全可缺省（模型漏写不崩）。
+- `DateObservation`：`{ time?, place?, state?, detail?, extra? }`，前四维全可缺省（模型漏写不崩）；
+  `extra?: Record<id,string>` 存用户**追加的自定义维度**的值（按 `DateObserveCustomField.id`）。
 - `CharacterProfile.dateObserve?: DateObserveConfig`：per-character 配置（开关 + 样式 + 字段自定义）。
   - `enabled?: boolean`：总开关。
   - `style?: DateObserveStyleId`：HUD 视觉样式（`hologram` 默认 / `ink` / `neon` / `crystal` / `terminal`）。
   - `fields?: Partial<Record<keyof DateObservation, DateObserveFieldConfig>>`：四个维度的自定义。
     - `DateObserveFieldConfig`：`{ label?, hint?, enabled? }`——`label` 只改 HUD 展示标签（**不参与解析**），
       `hint` 改「这一格让 AI 生成什么」，`enabled:false` 则该维度既不注入提示、HUD 也不渲染。任一项留空回落默认。
+    - `custom?: DateObserveCustomField[]`：**追加的自定义维度**（最多 6 个），`{ id, label, hint?, enabled? }`。
+      与默认维度不同，自定义维度的 `label` **同时是线格式字段名和 HUD 标签**——解析时按 label 精确匹配回该维度，
+      所以 `extractObservation` 必须收到 `custom` 才能解析（DateSession 传 `char.dateObserve?.custom`）。空 label 或禁用的不注入/不解析。
 - `DateState.observation?: DateObservation`：当前批次的观测，存进 savedDateState，恢复会话时回填 HUD。
 
 ## 样式与自定义（`datePrompts.ts` + `ObserveHUD.tsx` + `ObserveSettings.tsx`）
