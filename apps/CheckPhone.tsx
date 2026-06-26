@@ -151,6 +151,8 @@ const CheckPhone: React.FC = () => {
     const [ncName, setNcName] = useState('');
     const [ncKind, setNcKind] = useState<'real' | 'npc'>('npc');
     const [ncLinkedId, setNcLinkedId] = useState('');
+    // 改绑定弹窗（把联系人改绑到正确的真实角色 / 转为虚构）
+    const [showRebindModal, setShowRebindModal] = useState(false);
 
     // Custom App Creation State
     const [showCreateModal, setShowCreateModal] = useState(false);
@@ -700,6 +702,98 @@ ${layoutHint[layout || 'generic']}`;
         setSelectedContact(null);
         setActiveAppId('contacts');
         addToast('联系人及相关记录已彻底移除', 'success');
+    };
+
+    // 改绑定：把联系人改绑到「正确的真实角色」或「转为虚构 NPC」，保留这段对话 + 备注 + 了解 + 好感。
+    // 仔细处理各种情况：清掉旧的错绑镜像、给新角色建镜像、防自绑/重复绑/无变化。
+    const handleRebindContact = async (
+        contact: PhoneContact,
+        target: { kind: 'npc' } | { kind: 'real'; charId: string },
+    ) => {
+        if (!targetChar) return;
+        const isChatWith = (r: PhoneEvidence, cId: string | undefined, nm: string) =>
+            r.type === 'chat' && (r.contactId === cId || normName(r.title) === normName(nm));
+        const myRec = (targetChar.phoneState?.records || []).find(r => isChatWith(r, contact.id, contact.name));
+
+        const oldLinked = contact.kind === 'real' ? contact.linkedCharId : undefined;
+        const newLinked = target.kind === 'real' ? target.charId : undefined;
+
+        // 无变化的早退
+        if (target.kind === 'npc' && contact.kind === 'npc') { addToast('TA 已经是虚构联系人', 'info'); setShowRebindModal(false); return; }
+        if (target.kind === 'real' && contact.kind === 'real' && contact.linkedCharId === target.charId) { addToast('已经绑定 TA 了', 'info'); setShowRebindModal(false); return; }
+
+        if (target.kind === 'real') {
+            const d = characters.find(c => c.id === target.charId);
+            if (!d) { addToast('角色不存在', 'error'); return; }
+            if (d.id === targetChar.id) { addToast('不能把联系人绑定成 TA 自己', 'error'); return; }
+            // 防重复：通讯录里已有「另一条」联系人对应这个角色
+            const dupe = (targetChar.phoneState?.contacts || []).find(c => c.id !== contact.id && (c.linkedCharId === d.id || normName(c.name) === normName(d.name)));
+            if (dupe) { addToast(`通讯录里已有「${dupe.name}」对应该角色，先处理掉再绑`, 'error'); return; }
+        }
+
+        setShowRebindModal(false);
+
+        // 1) 清掉旧的真人镜像（原来绑的是真人、且目标换人/转虚构）
+        if (oldLinked && oldLinked !== newLinked) {
+            const ob = characters.find(c => c.id === oldLinked);
+            if (ob) {
+                const obContact = (ob.phoneState?.contacts || []).find(c => c.linkedCharId === targetChar.id || normName(c.name) === normName(targetChar.name));
+                for (const r of (ob.phoneState?.records || [])) {
+                    if (isChatWith(r, obContact?.id, targetChar.name) && r.systemMessageId) await DB.deleteMessage(r.systemMessageId);
+                }
+                updateCharacter(ob.id, (cur) => ({
+                    phoneState: {
+                        ...cur.phoneState,
+                        contacts: (cur.phoneState?.contacts || []).filter(c => !(obContact && c.id === obContact.id)),
+                        records: (cur.phoneState?.records || []).filter(r => !isChatWith(r, obContact?.id, targetChar.name)),
+                    },
+                }));
+            }
+        }
+
+        if (target.kind === 'real') {
+            const d = characters.find(c => c.id === target.charId)!;
+            // 2) 机主侧：改 kind/linkedCharId/名字（真人联系人显示真实角色名+头像），同步记录标题
+            updateCharacter(targetChar.id, (cur) => ({
+                phoneState: {
+                    ...cur.phoneState,
+                    contacts: (cur.phoneState?.contacts || []).map(c => c.id === contact.id
+                        ? { ...c, kind: 'real' as const, linkedCharId: d.id, name: d.name, avatar: undefined }
+                        : c),
+                    records: (cur.phoneState?.records || []).map(r => (myRec && r.id === myRec.id) ? { ...r, title: d.name } : r),
+                },
+            }));
+            // 3) 给新角色建镜像（把现有 A 视角对话翻转过去）
+            if (myRec?.detail) {
+                const flipped = flipTranscript(myRec.detail);
+                const now = Date.now();
+                updateCharacter(d.id, (cur) => {
+                    const cs = upsertContact(cur.phoneState?.contacts || [], {
+                        name: targetChar.name, kind: 'real', linkedCharId: targetChar.id, avatar: targetChar.avatar, lastInteraction: now,
+                    });
+                    const cid = cs.find(c => c.linkedCharId === targetChar.id || normName(c.name) === normName(targetChar.name))?.id;
+                    const recs = cur.phoneState?.records || [];
+                    const ex = recs.find(r => r.type === 'chat' && (r.contactId === cid || normName(r.title) === normName(targetChar.name)));
+                    const next = ex
+                        ? recs.map(r => r.id === ex.id ? { ...r, detail: flipped, timestamp: now, contactId: cid } : r)
+                        : [...recs, { id: `rec-${now}-${Math.random()}`, type: 'chat' as const, title: targetChar.name, detail: flipped, timestamp: now, contactId: cid }];
+                    return { phoneState: { ...cur.phoneState, contacts: cs, records: next } };
+                });
+            }
+            addToast(`已改绑到「${d.name}」`, 'success');
+        } else {
+            // 目标=虚构：去掉真实绑定与真人头像，对话/备注/了解/好感都留着
+            updateCharacter(targetChar.id, (cur) => ({
+                phoneState: {
+                    ...cur.phoneState,
+                    records: cur.phoneState?.records || [],
+                    contacts: (cur.phoneState?.contacts || []).map(c => c.id === contact.id
+                        ? { ...c, kind: 'npc' as const, linkedCharId: undefined, avatar: undefined }
+                        : c),
+                },
+            }));
+            addToast('已转为虚构联系人', 'success');
+        }
     };
 
     const handleCreateContact = () => {
@@ -1348,6 +1442,15 @@ ${layoutHint[layout || 'generic']}`;
                             </div>
                             <span className="text-[12px] font-bold tabular-nums shrink-0" style={{ color: affColor(c.affinity) }}>{c.affinity > 0 ? '+' : ''}{c.affinity}</span>
                         </div>
+                        {/* 绑定状态 + 改绑入口（甄别/绑定错了在这改，保留对话与备注） */}
+                        <button onClick={() => setShowRebindModal(true)}
+                            className="mt-3 w-full flex items-center gap-2 rounded-xl px-3 py-2 bg-white/[0.04] border border-white/[0.07] active:scale-[0.99] transition">
+                            <LinkSimple size={13} weight="bold" className="shrink-0 text-white/50" />
+                            <span className="text-[11px] text-white/55 flex-1 text-left truncate">
+                                {isReal ? `绑定真实角色：${linkedCharOf(c)?.name || '已绑定'}` : '虚构联系人（未绑定真实角色）'}
+                            </span>
+                            <span className="text-[11px] font-semibold shrink-0" style={{ color: accent }}>改绑定</span>
+                        </button>
                     </div>
 
                     {/* 备注 */}
@@ -2025,6 +2128,50 @@ ${layoutHint[layout || 'generic']}`;
                         <input value={ncName} onChange={e => setNcName(e.target.value)} placeholder="联系人名字（虚构）" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
                     )}
                 </div>
+            </Modal>
+
+            {/* 改绑定 Modal：把联系人改绑到正确的真实角色 / 转为虚构（保留对话+备注+了解+好感） */}
+            <Modal isOpen={showRebindModal} title="改绑定" onClose={() => setShowRebindModal(false)}>
+                {selectedContact && (
+                    <div className="space-y-3">
+                        <p className="text-[11.5px] text-slate-500 leading-relaxed">
+                            甄别/绑定错了在这改。会保留这段对话、备注、了解和好感；改成真人会把对话同步进对方手机，原来错绑的角色那边会清掉。
+                        </p>
+                        {/* 转为虚构 */}
+                        <button
+                            onClick={() => handleRebindContact(selectedContact, { kind: 'npc' })}
+                            disabled={selectedContact.kind === 'npc'}
+                            className={`w-full flex items-center gap-2.5 rounded-xl p-3 border text-left transition ${selectedContact.kind === 'npc' ? 'border-slate-200 bg-slate-100 opacity-50' : 'border-slate-200 bg-slate-50 active:scale-[0.99]'}`}>
+                            <span className="w-8 h-8 rounded-lg bg-slate-200 flex items-center justify-center text-slate-500 shrink-0"><User size={16} weight="bold" /></span>
+                            <div className="min-w-0">
+                                <div className="text-[13px] font-bold text-slate-700">转为虚构联系人</div>
+                                <div className="text-[10px] text-slate-400">不绑定真实角色 · 当成 NPC{selectedContact.kind === 'npc' ? '（当前就是）' : ''}</div>
+                            </div>
+                        </button>
+                        {/* 绑定到真实角色 */}
+                        <div>
+                            <div className="text-[10px] font-bold text-slate-400 uppercase mb-1.5">绑定到真实角色</div>
+                            <div className="max-h-64 overflow-y-auto space-y-1.5 no-scrollbar">
+                                {characters.filter(c => c.id !== targetChar?.id).length === 0 && (
+                                    <p className="text-[11px] text-slate-400 px-1 py-2">神经链接里没有其它角色可绑。</p>
+                                )}
+                                {characters.filter(c => c.id !== targetChar?.id).map(rc => {
+                                    const current = selectedContact.kind === 'real' && selectedContact.linkedCharId === rc.id;
+                                    return (
+                                        <button key={rc.id}
+                                            onClick={() => handleRebindContact(selectedContact, { kind: 'real', charId: rc.id })}
+                                            disabled={current}
+                                            className={`w-full flex items-center gap-2.5 rounded-xl p-2.5 border text-left transition ${current ? 'border-pink-300 bg-pink-50' : 'border-slate-200 bg-slate-50 active:scale-[0.99]'}`}>
+                                            <img src={rc.avatar} alt="" className="w-8 h-8 rounded-lg object-cover shrink-0" />
+                                            <span className="text-[13px] font-semibold text-slate-700 flex-1 truncate">{rc.name}</span>
+                                            {current && <span className="text-[10px] font-bold text-pink-500 shrink-0">当前绑定</span>}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                )}
             </Modal>
 
             {/* 通用二次确认弹窗：删除 / 移除 / 拉黑 / 清空都走这里 */}
