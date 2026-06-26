@@ -172,7 +172,7 @@ const CheckPhone: React.FC = () => {
     const [newAppPrompt, setNewAppPrompt] = useState('');
     const [newAppLayout, setNewAppLayout] = useState<NonNullable<PhoneCustomApp['layout']>>('generic');
 
-    // 智能体 App State（「AI 也在玩 AI」偷看）
+    // 智能体 App State（「TA 的小手机」偷看）
     const [aiService, setAiService] = useState<AiServiceKind>('assistant'); // 智能体首页当前选中的服务 tab
     const [selectedAiSessionId, setSelectedAiSessionId] = useState<string | null>(null);
     const [aiInput, setAiInput] = useState('');
@@ -639,7 +639,7 @@ ${layoutHint[layout || 'generic']}`;
     // 新的来往一律走「人际关系」(真人双向对话 / NPC 脑补)。
 
     // ============================================================
-    //  智能体 App · Handlers（「AI 也在玩 AI」）
+    //  智能体 App · Handlers（「TA 的小手机」）
     // ============================================================
 
     // 裸 LLM 调用（智能体生成 / 互动续写共用）
@@ -1272,7 +1272,7 @@ ${layoutHint[layout || 'generic']}`;
     // 「联系人」主卡副标题：TA 通讯录里的人数（不含用户自己）
     const contactCount = contacts.filter(c => !isUserName(c.name)).length;
     const contactsSub = contactCount ? `${contactCount} 位联系人` : 'tap to scan';
-    const aiSub = aiSessions.length ? `${aiSessions.length} 段对话 · TA 也在玩 AI` : 'tap to peek';
+    const aiSub = aiSessions.length ? `${aiSessions.length} 段对话 · TA 的小手机` : 'tap to peek';
 
     // pseudo screen-time + weather (decorative, deterministic per char)
     const seed = charName.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
@@ -1665,7 +1665,7 @@ ${layoutHint[layout || 'generic']}`;
         const list = aiSessions.filter(s => s.service === aiService).sort((a, b) => b.updatedAt - a.updatedAt);
         return (
             <SubAppShell>
-                <TermHeader title="智能体" sub="AI · 也在玩 AI" accent={svc.accent} onBack={() => setActiveAppId('home')}
+                <TermHeader title="智能体" sub="TA 的小手机" accent={svc.accent} onBack={() => setActiveAppId('home')}
                     right={<Robot size={20} weight="fill" style={{ color: svc.accent }} />} />
                 {/* 服务 tab */}
                 <div className="px-4 pb-2 shrink-0 flex gap-2">
@@ -2125,7 +2125,7 @@ ${layoutHint[layout || 'generic']}`;
                     onClick={() => setActiveAppId('taobao')} />
             </div>
 
-            {/* 智能体：偷看「AI 也在玩 AI」 —— 给个抢眼的横条入口 */}
+            {/* 智能体：偷看「TA 的小手机」 —— 给个抢眼的横条入口 */}
             <button onClick={() => setActiveAppId('aiagent')}
                 className="relative w-full rounded-[24px] p-4 mb-3.5 text-left overflow-hidden border border-white/[0.09] active:scale-[0.98] transition-transform flex items-center gap-3.5"
                 style={{ background: 'linear-gradient(115deg, rgba(52,211,153,0.20), rgba(16,185,129,0.06) 55%, rgba(12,20,18,0.4))' }}>
