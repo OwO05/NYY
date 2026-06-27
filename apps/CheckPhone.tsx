@@ -1486,6 +1486,8 @@ ${olderText}
         const ownerSendToChat = owner.phoneState?.sendToChat !== false;
         let msgId: number | undefined;
         if (ownerSendToChat) {
+            // 续写时先删掉这段对话上一张卡，私聊里只留一张最新完整的（不再 AB / ABC 堆叠）
+            if (existing?.systemMessageId) await DB.deleteMessage(existing.systemMessageId);
             msgId = await DB.saveMessage({
                 charId: owner.id, role: 'assistant', type: 'phone_card',
                 content: `[你手机的聊天软件] 你和「${partnerName}」的对话：${detail.replace(/\n/g, ' ')}`,
