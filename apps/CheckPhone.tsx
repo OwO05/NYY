@@ -1547,18 +1547,30 @@ ${olderText}
             });
             if (!detail.trim()) { addToast('对方没有回应', 'error'); return; }
             const now = Date.now();
+            // 同步到私聊：和真人对话一致，落一张 phone_card（受 sendToChat 控制）。
+            // 续写时先删掉上一张卡片再发新的，避免同一段对话越堆越多。
+            const pushToChat = targetChar.phoneState?.sendToChat !== false;
+            let msgId: number | undefined;
+            if (pushToChat) {
+                if (existing?.systemMessageId) await DB.deleteMessage(existing.systemMessageId);
+                msgId = await DB.saveMessage({
+                    charId: targetChar.id, role: 'assistant', type: 'phone_card',
+                    content: `[你手机的聊天软件] 你和「${contact.name}」的对话：${detail.replace(/\n/g, ' ')}`,
+                    metadata: { phoneCard: { app: '聊天软件', kind: 'chat', title: contact.name, detail } },
+                } as any);
+            }
             updateCharacter(targetChar.id, (cur) => {
                 const recs = cur.phoneState?.records || [];
                 const next = existing
-                    ? recs.map(r => r.id === existing.id ? { ...r, detail, timestamp: now } : r)
-                    : [...recs, { id: `rec-${now}-${Math.random()}`, type: 'chat', title: contact.name, detail, timestamp: now, contactId: contact.id }];
+                    ? recs.map(r => r.id === existing.id ? { ...r, detail, timestamp: now, systemMessageId: msgId ?? r.systemMessageId } : r)
+                    : [...recs, { id: `rec-${now}-${Math.random()}`, type: 'chat', title: contact.name, detail, timestamp: now, contactId: contact.id, systemMessageId: msgId }];
                 // 把这次脑补出来的新设定累积进该 NPC 的「了解」，保持下次一致
                 const contactsNext = learnedNew
                     ? (cur.phoneState?.contacts || []).map(c => c.id === contact.id ? { ...c, learned: appendLearned(c.learned, learnedNew) } : c)
                     : cur.phoneState?.contacts;
                 return { phoneState: { ...cur.phoneState, records: next, ...(contactsNext ? { contacts: contactsNext } : {}) } };
             });
-            addToast('生成了一段对话', 'success');
+            addToast(pushToChat ? '偷看到一段对话 · 已同步私聊' : '偷看到一段对话', 'success');
         } catch (e) {
             console.error(e);
             addToast('对话生成失败', 'error');
