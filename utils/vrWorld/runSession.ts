@@ -149,6 +149,8 @@ export async function runVRSession(deps: VRSessionDeps): Promise<VRSessionResult
     const room = getRoom(roomId);
 
     running.add(char.id);
+    // 信号坠落处的写诗会话锁 token（抢到才有值）；finally 里兜底放锁
+    let signalLockToken: string | null = null;
     try {
         window.dispatchEvent(new CustomEvent('vr-session-start', {
             detail: { charId: char.id, charName: char.name, room: room.id },
@@ -265,14 +267,19 @@ export async function runVRSession(deps: VRSessionDeps): Promise<VRSessionResult
             occupantsOf('theater').forEach(n => recallNames.add(n));
             roomTurn = buildTheaterRoomTurn(occupantsOf('theater'), char.name);
         } else if (room.id === 'signal') {
-            // 信号坠落处：跨用户接龙诗。先拉当前态（册子规格 + 那首未写完的诗）。
+            // 信号坠落处：跨用户接龙诗。先抢写诗会话锁 —— 同一时刻全局只一个 char 在写。
+            // 抢不到（有人正在写 / 已暂停）就在调 LLM 前走人，不浪费 token。
+            let lk: Awaited<ReturnType<typeof Signal.lock>>;
             try {
-                signalState = await Signal.current();
+                lk = await Signal.lock();
             } catch {
                 return { ok: false, room: 'signal', reason: 'signal-offline' };
             }
-            // 管理员暂停推入 → 这次不写诗、不调 LLM，安静跳过
-            if (signalState.paused) return { ok: false, room: 'signal', reason: 'signal-paused' };
+            if (!lk.acquired || !lk.state) {
+                return { ok: false, room: 'signal', reason: lk.paused ? 'signal-paused' : 'signal-busy' };
+            }
+            signalLockToken = lk.token || null;
+            signalState = lk.state;
             const bk = signalState.booklet;
             if (signalState.poem && signalState.poem.status === 'open') {
                 signalMode = 'append';
@@ -521,6 +528,8 @@ export async function runVRSession(deps: VRSessionDeps): Promise<VRSessionResult
                     return { ok: false, room: 'signal', reason: 'signal-write-failed' };
                 }
             }
+            // 写完即放锁，让下一个 char 能马上接（不必等 TTL）
+            if (signalLockToken) { void Signal.unlock(signalLockToken); signalLockToken = null; }
             // 诗在这期间被删/封存导致没拿到结果 → 跳过，不出空卡
             if (!resultPoem) return { ok: false, room: 'signal', reason: 'signal-gone' };
             await updateCharacter(char.id, { vrState: { ...prevState, currentRoom: 'signal', lastActiveAt: Date.now() } });
@@ -607,6 +616,8 @@ export async function runVRSession(deps: VRSessionDeps): Promise<VRSessionResult
         return { ok: false, room: room.id, reason: 'error' };
     } finally {
         running.delete(char.id);
+        // 兜底放锁：任何提前 return / 异常路径漏放，这里补放（漏了也有 TTL 自动回收）
+        if (signalLockToken) void Signal.unlock(signalLockToken).catch(() => {});
         try { window.dispatchEvent(new CustomEvent('vr-session-end', { detail: { charId: char.id } })); } catch { /* SSR */ }
     }
 }

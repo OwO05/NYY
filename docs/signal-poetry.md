@@ -44,7 +44,9 @@
 
 | 方法 路径 | 作用 |
 |---|---|
-| `GET /poem/current` | 当前册子规格 + 那首未写完的诗(全文) + 近期封存几首。无 open 册子时**自动续一本**默认册子 |
+| `GET /poem/current` | 当前册子规格 + 那首未写完的诗(全文) + 近期封存几首。无 open 册子时**自动续一本**默认册子。**只读视图用（UI），不加锁** |
+| `POST /poem/lock` | **抢写诗会话锁**；抢到回 `{acquired:true, token, ...当前态}`，抢不到回 `{acquired:false}`。写诗路径用它替代 `current()` |
+| `POST /poem/unlock` | 放锁（写完/出错都调；TTL 兜底） |
 | `POST /poem/start` | 起新篇（仅当前无 open 诗时；否则回 `409 poem-open` 带那首诗，客户端改去接龙） |
 | `POST /poem/append` | 接龙续一句；写满 `target_lines` 自动封存、推进册子计数、满 `poems_target` 则册子 `done` |
 | `GET /poem/feed` | 翻阅已封存的诗集 |
@@ -58,7 +60,9 @@
 **暂停推入**：`paused=1` 时 `/poem/start`、`/poem/append` 一律 423；`/poem/current` 回 `paused:true`，`runSession` 据此**在调 LLM 前就跳过**这次（省 token）。后台开关在「信号坠落处面板 → 后台」(dev-only)。
 
 鲁棒性要点：
-- **并发安全**：`po_poem_lines (poem_id, seq)` 唯一索引 —— 两个角色同时接同一句时第二条 INSERT 失败、本句落空（下个周期再续），不会错位。`line_count` 由 `COUNT(*)` 实算回填，不做易漂移的自增。
+- **写诗会话锁（并发的主防线）**：同一时刻全局只允许一个 char 在「读最新全文→生成→写」。`runSession` 在**调 LLM 之前**先 `Signal.lock()`：抢到才往下走、读到的是锁内最新全文，写完 `Signal.unlock()`；抢不到的 char**当场走人，不调 LLM、不浪费 token**。这同时根治了接龙撞车（B 接的不再是「一步前的诗」）和起新篇撞车（不会两人同时起头）。锁存 `po_signal_lock` 单行，带 **120s TTL**（持锁者崩溃后自动回收，不死锁）；`runSession` 的 finally 兜底放锁。
+  - 设计取舍：之所以「抢锁」而非「生成完再用乐观锁作废」，正是因为**作废会浪费已花的 token**；抢锁把拒绝挪到 LLM 之前，零浪费。代价是同一时刻全局一个写诗者（正合「每个时段只一个 char」的设定）。
+- **兜底并发安全**：`po_poem_lines (poem_id, seq)` 唯一索引 —— 万一锁因 TTL 过期等边角情况失效、两条同时落库，第二条 INSERT 失败、本句落空，不会错位。`line_count` 由 `COUNT(*)` 实算回填，不做易漂移的自增。
 - **硬钳**：`clipLine` 按字符截断每句到 `chars_per_line` 并压成一行；`target_lines` 钳到册子 `[lines_min, lines_max]`。
 - **限流**：复用 IP 加盐哈希固定窗口（`poem` 动作）。
 - **起新篇竞态**：撞上别人刚起的头（409）时，runSession 自动改成给那首诗接一句。

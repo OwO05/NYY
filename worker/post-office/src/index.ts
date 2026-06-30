@@ -33,6 +33,8 @@
  *   ── 信号坠落处 / 跨用户接龙诗（复用本后端的匿名 device / 笔名 / 限流）──
  *   GET   …/poem/current?device=  →  当前册子规格 + 那首未写完的诗(全文) + 近期封存几首
  *                                     带 device → 每句打 mine 标记（只对请求者，不暴露别人 device）
+ *   POST  …/poem/lock   { device }  →  抢写诗会话锁；{acquired:true,token,...当前态} 或 {acquired:false}
+ *   POST  …/poem/unlock { token }   →  放锁（写完/出错都调；TTL 兜底）
  *   POST  …/poem/start    { device, pen, title, firstLine, targetLines }    起新篇（仅无 open 诗时）
  *   POST  …/poem/append   { device, pen, poemId, content }                  接龙续一句（满篇幅自动封存）
  *   GET   …/poem/feed?limit=&booklet=&device=&mine=1                        翻阅已封存的诗集（mine=1 只看本机参与过的）
@@ -131,6 +133,9 @@ async function ensureSchema(db: D1Database) {
     await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_po_poem_lines_seq ON po_poem_lines(poem_id, seq);`);
     // 全局开关（如「暂停诗歌推入」）：key/value 单表
     await db.exec(`CREATE TABLE IF NOT EXISTS po_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+    // 写诗会话锁（单行）：同一时刻全局只允许一个 char 在「读→生成→写」。抢不到的 char
+    // 在调 LLM 前就被挡回，既杜绝接龙撞车、又不浪费 token。带 TTL 防持锁者崩溃后死锁。
+    await db.exec(`CREATE TABLE IF NOT EXISTS po_signal_lock (id TEXT PRIMARY KEY, holder TEXT, expires_at INTEGER NOT NULL DEFAULT 0);`);
     schemaReady = true;
 }
 
@@ -215,6 +220,9 @@ async function setFlag(db: D1Database, key: string, value: string): Promise<void
     await db.prepare(`INSERT INTO po_config (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = ?`).bind(key, value, value).run();
 }
 const PAUSE_KEY = 'signal_paused';
+/** 写诗会话锁 TTL：持锁超过这个时长视为持锁者已崩溃，锁可被抢占。
+ *  一次写诗 = 一回 LLM（含人设/记忆的大 prompt）+ 两次网络，给到 120s 很宽裕。 */
+const SIGNAL_LOCK_TTL = 120_000;
 
 /** 删一整首诗（连同它的句）。 */
 async function deletePoem(db: D1Database, poemId: string): Promise<void> {
@@ -485,6 +493,41 @@ export default {
                 for (const r of (recentRows.results || [])) recent.push(poemView(r, await loadLines(env.DB, r.id), myDev));
                 const paused = (await getFlag(env.DB, PAUSE_KEY)) === '1';
                 return json({ ok: true, booklet: bookletView(booklet), poem, recent, paused });
+            }
+
+            // ── 抢写诗会话锁。抢到才返回当前态（读最新全文）；抢不到（别人正在写/暂停）
+            //    客户端据此在调 LLM 前就走人，不浪费 token。──
+            if (req.method === 'POST' && ends('/poem/lock')) {
+                const body: any = await req.json().catch(() => ({}));
+                const device = String(body.device || '').slice(0, 80);
+                if (!device) return json({ ok: false, error: 'bad request' }, 400);
+                if ((await getFlag(env.DB, PAUSE_KEY)) === '1') return json({ ok: true, acquired: false, paused: true });
+                const now = Date.now();
+                const token = uuid();
+                await env.DB.prepare(`INSERT OR IGNORE INTO po_signal_lock (id, holder, expires_at) VALUES ('lock','',0)`).run();
+                // 原子抢占：仅当当前无人持有 或 已过期时才改 holder（SQLite 串行化写，天然防并发）
+                await env.DB.prepare(
+                    `UPDATE po_signal_lock SET holder = ?, expires_at = ? WHERE id = 'lock' AND (holder = '' OR holder IS NULL OR expires_at < ?)`
+                ).bind(token, now + SIGNAL_LOCK_TTL, now).run();
+                const cur = await env.DB.prepare(`SELECT holder FROM po_signal_lock WHERE id = 'lock'`).first<{ holder: string }>();
+                if (cur?.holder !== token) return json({ ok: true, acquired: false }); // 没抢到，有人正在写
+                // 抢到了 → 在锁内读当前态返回（保证写诗者读的是最新全文）
+                const myDev = device;
+                const booklet = await ensureBooklet(env.DB);
+                const open = await getOpenPoem(env.DB, booklet.id);
+                const poem = open ? poemView(open, await loadLines(env.DB, open.id), myDev) : null;
+                const recentRows = await env.DB.prepare(`SELECT * FROM po_poems WHERE status = 'sealed' ORDER BY sealed_at DESC LIMIT 3`).all<PoemRow>();
+                const recent = [];
+                for (const r of (recentRows.results || [])) recent.push(poemView(r, await loadLines(env.DB, r.id), myDev));
+                return json({ ok: true, acquired: true, token, booklet: bookletView(booklet), poem, recent, paused: false });
+            }
+
+            // ── 放锁（写完/出错都调；带 TTL 兜底，漏放也会自动过期）──
+            if (req.method === 'POST' && ends('/poem/unlock')) {
+                const body: any = await req.json().catch(() => ({}));
+                const token = String(body.token || '');
+                if (token) await env.DB.prepare(`UPDATE po_signal_lock SET holder = '', expires_at = 0 WHERE holder = ?`).bind(token).run();
+                return json({ ok: true });
             }
 
             // ── 起新篇：自拟标题 + 第一句 + 已 roll 的篇幅。仅当前无 open 诗时允许 ──

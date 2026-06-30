@@ -51,6 +51,7 @@ async function ensureSchema(db) {
   await db.exec(`CREATE TABLE IF NOT EXISTS po_poem_lines (id TEXT PRIMARY KEY, poem_id TEXT NOT NULL, booklet_id TEXT NOT NULL, seq INTEGER NOT NULL, device TEXT NOT NULL, pen TEXT NOT NULL, content TEXT NOT NULL, created_at INTEGER NOT NULL);`);
   await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_po_poem_lines_seq ON po_poem_lines(poem_id, seq);`);
   await db.exec(`CREATE TABLE IF NOT EXISTS po_config (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+  await db.exec(`CREATE TABLE IF NOT EXISTS po_signal_lock (id TEXT PRIMARY KEY, holder TEXT, expires_at INTEGER NOT NULL DEFAULT 0);`);
   schemaReady = true;
 }
 async function getUid(db, ownerId) {
@@ -125,6 +126,7 @@ async function setFlag(db, key, value) {
   await db.prepare(`INSERT INTO po_config (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = ?`).bind(key, value, value).run();
 }
 var PAUSE_KEY = "signal_paused";
+var SIGNAL_LOCK_TTL = 12e4;
 async function deletePoem(db, poemId) {
   await db.prepare(`DELETE FROM po_poem_lines WHERE poem_id = ?`).bind(poemId).run();
   await db.prepare(`DELETE FROM po_poems WHERE id = ?`).bind(poemId).run();
@@ -340,6 +342,34 @@ var src_default = {
         for (const r of recentRows.results || []) recent.push(poemView(r, await loadLines(env.DB, r.id), myDev));
         const paused = await getFlag(env.DB, PAUSE_KEY) === "1";
         return json({ ok: true, booklet: bookletView(booklet), poem, recent, paused });
+      }
+      if (req.method === "POST" && ends("/poem/lock")) {
+        const body = await req.json().catch(() => ({}));
+        const device = String(body.device || "").slice(0, 80);
+        if (!device) return json({ ok: false, error: "bad request" }, 400);
+        if (await getFlag(env.DB, PAUSE_KEY) === "1") return json({ ok: true, acquired: false, paused: true });
+        const now = Date.now();
+        const token = uuid();
+        await env.DB.prepare(`INSERT OR IGNORE INTO po_signal_lock (id, holder, expires_at) VALUES ('lock','',0)`).run();
+        await env.DB.prepare(
+          `UPDATE po_signal_lock SET holder = ?, expires_at = ? WHERE id = 'lock' AND (holder = '' OR holder IS NULL OR expires_at < ?)`
+        ).bind(token, now + SIGNAL_LOCK_TTL, now).run();
+        const cur = await env.DB.prepare(`SELECT holder FROM po_signal_lock WHERE id = 'lock'`).first();
+        if (cur?.holder !== token) return json({ ok: true, acquired: false });
+        const myDev = device;
+        const booklet = await ensureBooklet(env.DB);
+        const open = await getOpenPoem(env.DB, booklet.id);
+        const poem = open ? poemView(open, await loadLines(env.DB, open.id), myDev) : null;
+        const recentRows = await env.DB.prepare(`SELECT * FROM po_poems WHERE status = 'sealed' ORDER BY sealed_at DESC LIMIT 3`).all();
+        const recent = [];
+        for (const r of recentRows.results || []) recent.push(poemView(r, await loadLines(env.DB, r.id), myDev));
+        return json({ ok: true, acquired: true, token, booklet: bookletView(booklet), poem, recent, paused: false });
+      }
+      if (req.method === "POST" && ends("/poem/unlock")) {
+        const body = await req.json().catch(() => ({}));
+        const token = String(body.token || "");
+        if (token) await env.DB.prepare(`UPDATE po_signal_lock SET holder = '', expires_at = 0 WHERE holder = ?`).bind(token).run();
+        return json({ ok: true });
       }
       if (req.method === "POST" && ends("/poem/start")) {
         if (await getFlag(env.DB, PAUSE_KEY) === "1") return json({ ok: false, error: "paused" }, 423);

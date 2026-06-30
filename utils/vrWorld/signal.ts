@@ -65,9 +65,28 @@ export const Signal = {
         try { await call('/poem/current'); return true; } catch { return false; }
     },
 
-    /** 读当前态：册子规格 + 那首未写完的诗(全文) + 近期封存几首。带本机 device → 句子回 mine 标记。 */
+    /** 读当前态：册子规格 + 那首未写完的诗(全文) + 近期封存几首。带本机 device → 句子回 mine 标记。
+     *  只读视图用（UI 面板）；写诗路径走 lock()。 */
     async current(): Promise<SignalState> {
         return await call<SignalState>('/poem/current', { query: { device: getDeviceId() } });
+    },
+
+    /**
+     * 抢写诗会话锁。抢到才返回 {acquired:true, token, state}（state 是锁内读到的最新全文）；
+     * 抢不到（有别的 char 正在写 / 已暂停）返回 {acquired:false}。写诗路径用这个替代 current()，
+     * 让抢不到的 char 在调 LLM 前就走人 —— 既串行化接龙、又不浪费 token。
+     */
+    async lock(): Promise<{ acquired: boolean; token?: string; paused?: boolean; state?: SignalState }> {
+        const r = await call<{ acquired: boolean; token?: string; paused?: boolean; booklet?: SignalBooklet; poem?: SignalPoem | null; recent?: SignalPoem[] }>(
+            '/poem/lock', { method: 'POST', body: JSON.stringify({ device: getDeviceId() }) },
+        );
+        if (!r.acquired) return { acquired: false, paused: r.paused };
+        return { acquired: true, token: r.token, state: { booklet: r.booklet!, poem: r.poem ?? null, recent: r.recent || [], paused: false } };
+    },
+
+    /** 放写诗会话锁（写完/出错都调；漏放也会被 TTL 自动回收）。 */
+    async unlock(token: string): Promise<void> {
+        try { await call('/poem/unlock', { method: 'POST', body: JSON.stringify({ token }) }); } catch { /* TTL 兜底 */ }
     },
 
     /**
