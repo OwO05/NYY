@@ -20,6 +20,8 @@ export interface VRRoomDef {
     implemented: boolean;
     /** UI 主题色（tailwind 渐变用） */
     accent: string;
+    /** 不作为普通房间卡显示在网格里（如信号坠落处走顶部特殊活动 banner 入口） */
+    hiddenFromGrid?: boolean;
 }
 
 export const VR_ROOMS: VRRoomDef[] = [
@@ -85,6 +87,7 @@ export const VR_ROOMS: VRRoomDef[] = [
         emoji: '',
         implemented: true,
         accent: 'indigo',
+        hiddenFromGrid: true, // 走顶部「特殊活动」banner 入口，不作普通房间卡；也不进自主活动随机池
     },
     {
         id: 'cafe',

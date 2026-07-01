@@ -124,12 +124,13 @@ function nameLine(name: string, act: string): string {
 }
 
 /** roll 一个房间：图书馆需有书；听歌房需有歌单或正在放歌；留言簿/娱乐室/邮局/剧院恒可去。 */
-function rollRoom(char: CharacterProfile, novels: VRWorldNovel[], musicState: VRMusicRoomState | null, prefer?: VRRoomId, exclude?: VRRoomId): VRRoomId | null {
-    let pool: VRRoomId[] = ['guestbook', 'gym', 'postoffice', 'theater', 'signal'];
+function rollRoom(char: CharacterProfile, novels: VRWorldNovel[], musicState: VRMusicRoomState | null, prefer?: VRRoomId): VRRoomId | null {
+    // 信号坠落处【不进随机池】——它是用户自发参与的特殊活动，只在用户点「参与→指定角色」
+    // 时以 forcedRoom='signal' 进入，角色不会自己随机逛过去。
+    if (prefer === 'signal') return 'signal';
+    const pool: VRRoomId[] = ['guestbook', 'gym', 'postoffice', 'theater'];
     if (novels.length > 0) pool.push('library');
     if (gatherCharSongs(char).length > 0 || musicState?.nowPlaying) pool.push('music');
-    if (exclude) pool = pool.filter(r => r !== exclude); // 碰壁改投时排除原房间
-    if (pool.length === 0) return null;
     if (prefer && pool.includes(prefer)) return prefer; // 指定的房间可用则去，否则回退随机
     return pool[Math.floor(Math.random() * pool.length)];
 }
@@ -194,26 +195,17 @@ export async function runVRSession(deps: VRSessionDeps): Promise<VRSessionResult
         const recallNames = new Set<string>();
         const recallExtra: string[] = [];
 
-        // roll 到信号坠落处时：在调 LLM 之前先抢写诗会话锁。
-        // 抢到 → 读到锁内最新全文往下写；抢不到（有别的 char 正在写）→ 改投一个别的房间，
-        // 这一轮照样干活，且全程仍只调一次 LLM（抢锁/改投都在 LLM 之前完成）。
+        // 信号坠落处（用户点「参与」发起）：在调 LLM 之前先抢写诗会话锁。
+        // 抢到 → 读到锁内最新全文往下写；抢不到（有别的用户的 char 正在写 / 后台暂停）→ 本轮作罢。
         if (room.id === 'signal') {
             let lk: Awaited<ReturnType<typeof Signal.lock>>;
             try { lk = await Signal.lock(); }
             catch { return { ok: false, room: 'signal', reason: 'signal-offline' }; }
-            if (lk.acquired && lk.state) {
-                signalLockToken = lk.token || null;
-                signalState = lk.state;
-            } else if (forcedRoom === 'signal' || lk.paused) {
-                // 用户明确点了「去信号坠落处」或后台已暂停 → 不改投，本轮作罢
+            if (!lk.acquired || !lk.state) {
                 return { ok: false, room: 'signal', reason: lk.paused ? 'signal-paused' : 'signal-busy' };
-            } else {
-                // 碰壁：改投一个非 signal 房间，照常进下面的加载与那唯一一次 LLM
-                const alt = rollRoom(char, novels, musicState, undefined, 'signal');
-                if (!alt) return { ok: false, room: 'signal', reason: 'signal-busy' };
-                roomId = alt;
-                room = getRoom(alt);
             }
+            signalLockToken = lk.token || null;
+            signalState = lk.state;
         }
 
         if (room.id === 'library') {

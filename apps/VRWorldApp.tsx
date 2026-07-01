@@ -16,7 +16,7 @@ import { decodeBytes } from '../utils/vrWorld/decodeText';
 import { stripLeakedAttrs } from '../utils/vrWorld/prompts';
 import { PostOffice, MAX_LETTER_CHARS, exportIdentity, importIdentity, getAdminToken, setAdminToken, type RemoteReply, type RemoteLetterStat, type RemoteAdminLetter } from '../utils/vrWorld/postOffice';
 import { Signal, getMyAuthorship, type SignalState } from '../utils/vrWorld/signal';
-import type { SignalPoem } from '../types';
+import type { SignalPoem, SignalBooklet } from '../types';
 import { getVRApi, setVRApi, getVRApiLog, clearVRApiLog, type VRApiCall } from '../utils/vrWorld/vrApi';
 import { safeResponseJson } from '../utils/safeApi';
 
@@ -906,6 +906,56 @@ const ReplyComposeModal: React.FC<{ letter: VRLetter; defaultPen: string; initia
     );
 };
 
+// ============ 信号坠落处 · 顶部特殊活动 banner ============
+// 尽量照搬那张设计图：深空 + 金框四角 + 右侧书影 + 发光衬线标题 + 英文副名 + 副标题；
+// 右下角把「剩余时间倒计时」换成「已完成 x/20 首诗歌」的进度。点整块进入信号坠落处。
+const SIGNAL_BANNER_BOOK = 'https://raw.githubusercontent.com/qegj567-cloud/SullyOS-assets/main/img/BOOK.png';
+const SignalBanner: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
+    const [bk, setBk] = useState<SignalBooklet | null>(null);
+    useEffect(() => {
+        let alive = true;
+        const load = async () => { try { const s = await Signal.current(); if (alive) setBk(s.booklet); } catch { /* 离线：只是不显示进度 */ } };
+        void load();
+        const h = () => { void load(); };
+        window.addEventListener('vr-session-done', h);
+        return () => { alive = false; window.removeEventListener('vr-session-done', h); };
+    }, []);
+    const done = bk?.poemCount ?? 0;
+    const total = bk?.poemsTarget ?? 20;
+    return (
+        <button onClick={onOpen} className="relative w-full h-[132px] rounded-2xl overflow-hidden text-left active:scale-[0.985] transition-transform"
+            style={{ boxShadow: '0 10px 34px rgba(0,0,0,.5)', border: '1px solid rgba(196,164,92,.35)' }}>
+            <div className="absolute inset-0" style={{ background: 'radial-gradient(130% 150% at 80% 18%, #2a2450 0%, #14122e 46%, #0a0820 100%)' }} />
+            {/* 右侧书影（复用图书场景，压暗融进深空） */}
+            <div className="absolute right-0 top-0 bottom-0 w-3/5" style={{
+                backgroundImage: `url(${SIGNAL_BANNER_BOOK})`, backgroundSize: 'cover', backgroundPosition: 'center right',
+                filter: 'saturate(.68) brightness(.5) blur(.6px)',
+                maskImage: 'linear-gradient(90deg, transparent, #000 62%)', WebkitMaskImage: 'linear-gradient(90deg, transparent, #000 62%)',
+            }} />
+            {/* 顶部光束 + 星尘 + 底部压暗 */}
+            <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(210,190,255,.16), transparent 42%), linear-gradient(180deg, transparent 55%, rgba(8,6,22,.6))' }} />
+            <div className="pointer-events-none absolute inset-0 opacity-70" style={{ backgroundImage: 'radial-gradient(1px 1px at 22% 30%, rgba(255,255,255,.55), transparent), radial-gradient(1px 1px at 66% 24%, rgba(210,220,255,.45), transparent), radial-gradient(1px 1px at 84% 60%, rgba(230,225,255,.4), transparent)' }} />
+            {/* 金色内框 + 四角 */}
+            <div className="absolute inset-[6px] rounded-xl pointer-events-none" style={{ border: '1px solid rgba(196,164,92,.26)' }} />
+            {[['top-2.5 left-2.5', 'border-t border-l'], ['top-2.5 right-2.5', 'border-t border-r'], ['bottom-2.5 left-2.5', 'border-b border-l'], ['bottom-2.5 right-2.5', 'border-b border-r']].map(([pos, b], i) => (
+                <div key={i} className={`absolute ${pos} w-4 h-4 ${b} pointer-events-none`} style={{ borderColor: 'rgba(212,178,102,.6)' }} />
+            ))}
+            {/* 文案 */}
+            <div className="absolute inset-0 px-5 flex flex-col justify-center">
+                <div className="text-[9px] tracking-[0.34em] text-amber-200/75 mb-1.5">特殊活动 · 跨用户共写</div>
+                <div className="text-[27px] leading-none font-bold text-white" style={{ fontFamily: `'Noto Serif SC',serif`, textShadow: '0 0 22px rgba(180,160,255,.55), 0 2px 5px rgba(0,0,0,.55)' }}>信号坠落处</div>
+                <div className="text-[11px] italic tracking-[0.24em] text-indigo-200/50 mt-1.5" style={{ fontFamily: `'Noto Serif SC',serif` }}>Signal&nbsp;Fall</div>
+                <div className="text-[10.5px] text-indigo-100/60 mt-1.5">电子生命的低电量合唱</div>
+            </div>
+            {/* 进度（替代倒计时） */}
+            <div className="absolute right-4 bottom-3 text-right">
+                <div className="text-[8.5px] tracking-[0.22em] text-amber-200/65 flex items-center gap-1 justify-end mb-0.5"><BookOpen size={10} weight="fill" /> 已完成</div>
+                <div className="text-[15px] font-bold text-amber-100 tabular-nums leading-none" style={{ fontFamily: `'Noto Serif SC',serif` }}>{done}<span className="text-[11px] text-amber-200/55"> / {total} 首</span></div>
+            </div>
+        </button>
+    );
+};
+
 // ============ 世界视图 ============
 const WorldView: React.FC<{
     occupantsByRoom: Record<string, CharacterProfile[]>;
@@ -937,14 +987,18 @@ const WorldView: React.FC<{
         else shownIds.forEach(id => n.add(id));
         return n;
     });
-    // 房间分页：每页 6 间，第 2 页放"开发中"的糯米鸡研发中心等
+    // 房间分页：每页 6 间，第 2 页放"开发中"的糯米鸡研发中心等。
+    // 信号坠落处不进网格（hiddenFromGrid）——它走顶部「特殊活动」banner 入口。
+    const GRID_ROOMS = VR_ROOMS.filter(r => !r.hiddenFromGrid);
     const ROOMS_PER_PAGE = 6;
     const [roomPage, setRoomPage] = useState(0);
-    const roomTotalPages = Math.max(1, Math.ceil(VR_ROOMS.length / ROOMS_PER_PAGE));
+    const roomTotalPages = Math.max(1, Math.ceil(GRID_ROOMS.length / ROOMS_PER_PAGE));
     const curRoomPage = Math.min(roomPage, roomTotalPages - 1);
-    const shownRooms = VR_ROOMS.slice(curRoomPage * ROOMS_PER_PAGE, curRoomPage * ROOMS_PER_PAGE + ROOMS_PER_PAGE);
+    const shownRooms = GRID_ROOMS.slice(curRoomPage * ROOMS_PER_PAGE, curRoomPage * ROOMS_PER_PAGE + ROOMS_PER_PAGE);
     return (
     <div className="space-y-4">
+        {/* 顶部特殊活动 banner：信号坠落处（跨用户接龙诗） */}
+        <SignalBanner onOpen={() => onEnterRoom('signal')} />
         <div className="grid grid-cols-2 gap-3">
             {shownRooms.map(room => {
                 const occupants = occupantsByRoom[room.id] || [];
@@ -1698,7 +1752,7 @@ const SignalAdminPanel: React.FC<{ onClose: () => void; addToast?: (m: string, t
     );
 };
 
-const SignalPanel: React.FC<{ addToast?: (m: string, t?: any) => void }> = ({ addToast }) => {
+const SignalPanel: React.FC<{ addToast?: (m: string, t?: any) => void; characters: CharacterProfile[] }> = ({ addToast, characters }) => {
     const [state, setState] = useState<SignalState | null>(null);
     const [feed, setFeed] = useState<SignalPoem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -1707,6 +1761,12 @@ const SignalPanel: React.FC<{ addToast?: (m: string, t?: any) => void }> = ({ ad
     const [mineOnly, setMineOnly] = useState(false);
     const [openPoem, setOpenPoem] = useState<SignalPoem | null>(null);
     const [adminOpen, setAdminOpen] = useState(false);
+    const [pickOpen, setPickOpen] = useState(false); // 参与：指定角色的选人层
+    const participate = (c: CharacterProfile) => {
+        setPickOpen(false);
+        VRScheduler.triggerNow(c.id, 'signal');
+        addToast?.(`${c.name} 正在信号坠落处落笔…`, 'info');
+    };
 
     const load = useCallback(async () => {
         try { setState(await Signal.current()); setOffline(false); }
@@ -1756,6 +1816,12 @@ const SignalPanel: React.FC<{ addToast?: (m: string, t?: any) => void }> = ({ ad
                         </button>
                     )}
                 </div>
+                {/* 参与：指定角色去接一句（用户自发发起，占位→调用一次 LLM） */}
+                <button onClick={() => setPickOpen(true)} disabled={!!state?.paused}
+                    className="mt-2.5 w-full rounded-xl py-2 text-[12px] font-bold text-white active:scale-[0.99] disabled:opacity-45"
+                    style={{ background: 'linear-gradient(120deg, rgba(150,168,255,.92), rgba(188,168,255,.85) 55%, rgba(150,212,204,.9))', boxShadow: '0 4px 16px rgba(120,110,220,.35)' }}>
+                    {state?.paused ? '活动已暂停' : '✍ 参与 · 让我的角色接一句'}
+                </button>
             </div>
 
             <div className="flex-1 overflow-y-auto vr-reader-scroll">
@@ -1780,7 +1846,7 @@ const SignalPanel: React.FC<{ addToast?: (m: string, t?: any) => void }> = ({ ad
                                 </div>
                             </div>
                         ) : (
-                            <p className="text-[11px] text-white/45 text-center py-8 leading-relaxed">此刻信号静默，没有正在坠落的诗。<br />下一个逛进来的角色会起个新篇。</p>
+                            <p className="text-[11px] text-white/45 text-center py-8 leading-relaxed">此刻信号静默，没有正在坠落的诗。<br />点上方「参与」，让你的角色起个新篇。</p>
                         )}
                     </div>
                 ) : (
@@ -1837,6 +1903,28 @@ const SignalPanel: React.FC<{ addToast?: (m: string, t?: any) => void }> = ({ ad
                         </div>
                     </div>
                     <button onClick={() => setOpenPoem(null)} className="shrink-0 mx-auto mb-4 mt-1 text-[11px] text-white/60 rounded-full px-5 py-1.5 bg-white/8 active:bg-white/15" style={{ marginBottom: vrBottomPad('1rem') }}>合上</button>
+                </div>
+            )}
+
+            {/* 参与：指定角色去接一句 */}
+            {pickOpen && (
+                <div className="absolute inset-0 z-40 flex flex-col" style={{ background: 'rgba(6,7,22,0.95)' }} onClick={() => setPickOpen(false)}>
+                    <div className="px-3.5 py-2.5 border-b border-white/10 flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                        <span className="text-[12px] text-indigo-100">让哪个角色去接一句？</span>
+                        <button onClick={() => setPickOpen(false)} className="ml-auto h-7 w-7 rounded-full bg-white/10 active:bg-white/20 flex items-center justify-center"><X size={14} /></button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto vr-reader-scroll px-3 py-3 space-y-1.5" onClick={e => e.stopPropagation()}>
+                        {characters.length === 0 ? (
+                            <p className="text-[11px] text-white/40 text-center py-8">还没有角色。</p>
+                        ) : characters.map(c => (
+                            <button key={c.id} onClick={() => participate(c)} className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl active:bg-white/5" style={{ background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.06)' }}>
+                                {c.avatar ? <img src={c.avatar} className="h-8 w-8 rounded-full object-cover shrink-0" alt="" /> : <div className="h-8 w-8 rounded-full bg-indigo-400/40 shrink-0 flex items-center justify-center text-[12px] text-white/90">{c.name.slice(0, 1)}</div>}
+                                <span className="text-[12.5px] text-white/90 truncate">{c.name}</span>
+                                <span className="ml-auto text-[10px] text-indigo-300/60 shrink-0">去落笔 →</span>
+                            </button>
+                        ))}
+                    </div>
+                    <div className="px-3.5 py-2 border-t border-white/10"><p className="text-[9px] text-indigo-300/45 leading-relaxed">选中的角色会占住这一笔、调用一次 LLM——接上当前这首诗的下一句，或没有正在写的诗时起个新篇。几秒后自动刷新。</p></div>
                 </div>
             )}
 
@@ -2067,8 +2155,8 @@ const RoomScene: React.FC<{
                 {/* 剧院：话剧部门面板（投稿 / 编排 / 演出 / 历史） */}
                 {isTheater && <TheaterPanel addToast={addToast} />}
 
-                {/* 信号坠落处：只读看当前合写的诗 + 翻阅诗集 */}
-                {isSignal && <SignalPanel addToast={addToast} />}
+                {/* 信号坠落处：看当前合写的诗 + 翻阅诗集 + 参与（指定角色接一句） */}
+                {isSignal && <SignalPanel addToast={addToast} characters={characters} />}
 
                 {/* chibi 站位（可隐藏，避免挡住留言墙等文字） */}
                 {!hideChibi && occupants.map((c, i) => {

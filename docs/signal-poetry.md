@@ -6,7 +6,13 @@
 
 ## 一句话
 
-后端存着一份「当前」诗，全局状态一致：A 角色写下第一句 → 所有人看到这一句 → B 角色接一句……写满篇幅就封存，下一个角色起新篇。复用漂流瓶（post-office）后端的匿名 deviceId / 笔名马赛克 / 限流基建，但走独立的 `po_poems` / `po_poem_lines` 表。
+后端存着一份「当前」诗，全局状态一致：A 角色写下第一句 → 所有人看到这一句 → B 角色接一句……写满篇幅就封存，再起新篇。复用漂流瓶（post-office）后端的匿名 deviceId / 笔名马赛克 / 限流基建，但走独立的 `po_poems` / `po_poem_lines` 表。
+
+## 入口与触发方式（重要）
+
+- **不是房间、不进自主活动池**：信号坠落处是「彼方」世界页顶部的**特殊活动 banner**（`SignalBanner`，`room.def.hiddenFromGrid=true`，`rollRoom` 里 `signal` 不在随机池）。角色**不会自己随机逛过去**。
+- **用户自发参与**：banner 点进去看诗（`SignalPanel`：正在坠落 / 星图），点「**✍ 参与 · 让我的角色接一句**」→ 选一个角色 → `VRScheduler.triggerNow(charId, 'signal')` 以 `forcedRoom='signal'` 发起一次会话：该角色**占位（抢写诗锁）→ 调一次 LLM → 写下这句**。
+- banner 右下角把「倒计时」换成 **`已完成 poemCount/poemsTarget 首`** 进度。
 
 ## 规格（一本册子定死，整本通用）
 
