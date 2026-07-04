@@ -57,6 +57,28 @@ describe('normalizeVoiceTags', () => {
     const s = '<语音>一</语音>中间<语音>二</语音>';
     expect(normalizeVoiceTags(s)).toBe(s);
   });
+
+  // ─── <字幕> 标签（显式翻译格式）───
+  it('规范的 语音+字幕 组合原样保留', () => {
+    const s = '<语音 emotion="calm">Take a rest.</语音>\n<字幕>好好休息。</字幕>';
+    expect(normalizeVoiceTags(s)).toBe(s);
+  });
+
+  it('未闭合语音 + 完整字幕 → 语音闭合插在字幕之前，不吞字幕', () => {
+    expect(normalizeVoiceTags('<语音>Take a rest.\n<字幕>好好休息。</字幕>'))
+      .toBe('<语音>Take a rest.</语音>\n<字幕>好好休息。</字幕>');
+  });
+
+  it('未闭合字幕 → 末尾补闭合；孤儿字幕闭合 → 删除', () => {
+    expect(normalizeVoiceTags('<语音>hi</语音>\n<字幕>你好'))
+      .toBe('<语音>hi</语音>\n<字幕>你好</字幕>');
+    expect(normalizeVoiceTags('前面</字幕>后面')).toBe('前面后面');
+  });
+
+  it('全角字幕标签 → 规范化', () => {
+    expect(normalizeVoiceTags('<语音>hi</语音>＜字幕＞你好＜/字幕＞'))
+      .toBe('<语音>hi</语音><字幕>你好</字幕>');
+  });
 });
 
 describe('自愈后整条管线联动', () => {
@@ -79,6 +101,26 @@ describe('自愈后整条管线联动', () => {
     const segs = sanitizeIntoSegments('<语音>hi\n\nthere</語音>');
     expect(segs).toHaveLength(1);
     expect(segs[0].sanitized).toBe('hi\n\nthere');
+  });
+
+  it('sanitizeIntoSegments: 语音+字幕组合整块单 segment, banner 用中文字幕', () => {
+    const segs = sanitizeIntoSegments('闲聊一句\n<语音 emotion="calm">Take a rest, okay?</语音>\n<字幕>好好休息，好吗？</字幕>');
+    expect(segs).toEqual([
+      { raw: '闲聊一句', sanitized: '闲聊一句' },
+      {
+        raw: '<语音 emotion="calm">Take a rest, okay?</语音>\n<字幕>好好休息，好吗？</字幕>',
+        sanitized: '好好休息，好吗？',
+      },
+    ]);
+  });
+
+  it('chunkText: 语音+字幕组合是一个原子 chunk, 不被换行拆开', () => {
+    const chunks = ChatParser.chunkText('打字的话\n<语音>Sleep well.\n\nGood night.</语音>\n<字幕>睡个好觉。\n\n晚安。</字幕>\n又一句');
+    expect(chunks).toEqual([
+      '打字的话',
+      '<语音>Sleep well.\n\nGood night.</语音>\n<字幕>睡个好觉。\n\n晚安。</字幕>',
+      '又一句',
+    ]);
   });
 });
 

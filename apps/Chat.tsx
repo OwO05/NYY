@@ -371,9 +371,11 @@ const Chat: React.FC = () => {
                 // AI already provided the spoken text (possibly translated) in <语音> tag.
                 // parseVoiceOutput already sanitized it (whitelisted sound tags only).
                 spokenText = voiceTagContent;
-                // originalText = text OUTSIDE the voice tag (the display/Chinese text).
+                // 翻译第一优先级: 模型显式给的 <字幕> 标签 —— 确定性, 不用猜也不用调 LLM。
+                // 其次是标签外的文字 (老格式 / 模型没写字幕时的兜底)。
                 // parseVoiceOutput 已做标签自愈 + 提取, 别再自己 replace 一遍。
-                originalText = parsedVoice.display ? cleanTextForTts(parsedVoice.display) : '';
+                originalText = parsedVoice.subtitle
+                    || (parsedVoice.display ? cleanTextForTts(parsedVoice.display) : '');
                 // 字幕对齐模式下中文字幕通常被 chunk 成同批次的独立气泡, 语音消息标签外没字。
                 // 先从兄弟气泡把字幕收回来当翻译 —— 确定性、零成本、跟用户看到的字幕逐字一致。
                 // (内部有结构对齐校验: 模型没守字幕格式、标签外是闲聊短句时返回空, 走下面 LLM)
