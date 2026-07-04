@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useOS } from '../../context/OSContext';
-import { Icons, INSTALLED_APPS } from '../../constants';
+import { INSTALLED_APPS } from '../../constants';
 import { AppID, CharacterProfile, RoomItem } from '../../types';
 import { DB } from '../../utils/db';
 import AppIcon from './AppIcon';
@@ -12,31 +12,30 @@ import { isDevDebugAvailable, subscribeDevDebugAvailability } from '../../utils/
 // ===== 电子宠物主题（tamagotchi skin）=====
 // 桌面不再是「放图标的手机」，而是一台养成机：屏幕主体是角色**真实的小屋**
 // （小小窝 App 里用户亲手装修的那间，家具/地毯/墙地面/立绘原样搬入，只读舞台），
-// 角色在里面呼吸、游荡、深夜睡觉；下方四颗糖果实体键 = 见面 / 聊天 / 小小窝 / 记忆宫殿。
+// 角色在里面呼吸、游荡、被戳会念聊天里说过的话；底部 CARE/TALK/HOME/ALBUM/SETTINGS 五键 dock。
+// 视觉基调照抄参考稿：薰衣草底 + 奶油卡片 + 柔紫描边 + 像素字（Courier Prime）。
 //
 // 性能红线（此文件的宪法）：
 //   · 零常驻 JS 动画 —— 循环动效全部 CSS keyframes 且只碰 transform/opacity；
 //     JS 只用 ≥15s 的一次性 setTimeout 换游荡坐标。
 //   · 禁 backdrop-filter；blur 仅限小面积静态装饰；每元素阴影 ≤1 层。
-//   · 渲染隔离 —— 舞台/状态栏拆 memo 子组件，分钟跳动不触达家具层 reconcile。
+//   · 渲染隔离 —— 舞台/状态卡拆 memo 子组件，分钟跳动不触达家具层 reconcile。
 //   · 图片全走 TokenImg / useBlobRefUrl（blobref 令牌自动解析回收）+ lazy。
 
-// —— 调色板（90 年代玩具：奶油 + 薄荷 + 糖果橙，与手游风的粉紫拉开距离）——
+// —— 调色板（薰衣草奶油 · 参考稿取色）——
 const PAL = {
-    ink: '#4a4238',      // 主文字 · 暖棕
-    fade: '#9b9082',     // 次文字
-    cream: '#fbf4e4',
-    mint: '#8fd6ae',
-    mintDeep: '#4fae7e',
-    peach: '#ffb59c',
-    peachDeep: '#f08a68',
-    butter: '#ffd98e',
-    butterDeep: '#e8ab4e',
-    lav: '#c3b2ee',
-    lavDeep: '#9678d8',
-    hot: '#ef8fb0',
-    lcd: '#e9f0dc',      // 液晶底 · 淡黄绿
-    lcdInk: '#4a5a41',   // 液晶字
+    frame: '#b3a3e0',    // 柔紫描边
+    frameSoft: 'rgba(179,163,224,0.45)',
+    cream: '#fdf9f2',    // 奶油卡片底
+    creamSoft: 'rgba(253,249,242,0.82)',
+    ink: '#7a6cb8',      // 主文字 · 紫
+    fade: '#a99bd4',     // 次文字 · 浅紫
+    heart: '#f2a7bb',    // 爱心/经验条粉
+    heartDeep: '#e8879f',
+    care: '#f2a3b0',     // dock · CARE 粉
+    talk: '#a9d8c2',     // dock · TALK 薄荷
+    album: '#cabdf0',    // dock · ALBUM 淡紫
+    night: '#3a3560',    // 夜钟深紫
 };
 const FONT_PX = `'Courier Prime', monospace`;                   // 像素/LCD 字
 const FONT_CN = `'ZCOOL KuaiLe', 'Noto Sans SC', sans-serif`;   // 中文圆润
@@ -74,40 +73,50 @@ const getBgStyle = (img: string | undefined, scale: number | undefined, repeat: 
 // 与 RoomApp 一致的图层法则：地毯压进 [1,11] 底层区间，家具按 y 排 z，角色 y+20 必然在最上
 const itemZ = (item: RoomItem) => item.type === 'rug' ? 1 + Math.floor(item.y / 10) : Math.floor(item.y);
 
-type DayPhase = 'day' | 'dusk' | 'night';
-const phaseOfHour = (h: number): DayPhase => (h < 6 || h >= 23) ? 'night' : (h >= 18 ? 'dusk' : 'day');
+const isNightHour = (h: number) => h < 6 || h >= 23;
 
-// 戳一戳短语（本地词库，不调 LLM）
-const POKE_LINES = ['嗯？', '干嘛啦…', '我在呢！', '(被戳了一下)', '別戳了别戳了', '✦?', '在想事情…', '要陪我玩吗！'];
+// 戳一戳兜底短语（角色还没说过话时用）
+const POKE_FALLBACK = ['嗯？', '干嘛啦…', '我在呢！', '(被戳了一下)', '別戳了别戳了', '✦?', '在想事情…', '要陪我玩吗！'];
 
-// 等级/天数口径与 MobileGameHome 完全一致：每条消息 10 exp，三角曲线升级
-const deriveLevel = (msgCount: number) => {
+// 等级口径与 MobileGameHome 完全一致：每条消息 10 exp，三角曲线升级
+const deriveStats = (msgCount: number) => {
     const totalExp = msgCount * 10;
     const base = 150;
-    return Math.max(1, Math.floor((1 + Math.sqrt(1 + (8 * totalExp) / base)) / 2));
+    const level = Math.max(1, Math.floor((1 + Math.sqrt(1 + (8 * totalExp) / base)) / 2));
+    const need = (base * level * (level - 1)) / 2;
+    const exp = Math.max(0, Math.round(totalExp - need));
+    const expMax = base * level;
+    return { level, exp, expMax };
 };
 
-// ─── 像素状态栏（LCD 条）：分钟跳动只重渲染这一条 ───────────────
-const PixelStatusBar = React.memo<{ hh: string; mm: string; level: number; days: number; unread: number; charName: string; multiChar: boolean; onSwitch: () => void }>(
-    ({ hh, mm, level, days, unread, charName, multiChar, onSwitch }) => (
-        <div className="flex items-center gap-2 rounded-xl px-3 py-1.5 mt-2.5"
-            style={{ background: PAL.lcd, border: `2px solid ${PAL.ink}`, fontFamily: FONT_PX, color: PAL.lcdInk }}>
-            <span className="text-[12px] font-bold tabular-nums tracking-[0.08em]">{hh}:{mm}</span>
-            <span className="text-[9px] opacity-40">✦</span>
-            <button onClick={onSwitch} className={`flex items-center gap-1 min-w-0 ${multiChar ? 'active:opacity-60' : ''}`}>
-                <span className="text-[11px] font-bold truncate max-w-[72px] tracking-wide">{charName}</span>
-                {multiChar && <span className="text-[8px] shrink-0 opacity-70">⇄</span>}
+// ─── 状态卡（参考稿：头像 + 时间/名字 + Lv + 爱心经验条）───────────
+const StatusCard = React.memo<{ hh: string; mm: string; level: number; expPct: number; charName: string; avatar?: string; multiChar: boolean; onSwitch: () => void }>(
+    ({ hh, mm, level, expPct, charName, avatar, multiChar, onSwitch }) => (
+        <div className="rounded-2xl px-3.5 py-2.5 mt-2.5 flex items-center gap-3"
+            style={{ background: PAL.creamSoft, border: `2px solid ${PAL.frame}` }}>
+            <button onClick={onSwitch} className={`relative shrink-0 ${multiChar ? 'active:scale-95 transition-transform' : ''}`}>
+                <div className="w-[52px] h-[52px] rounded-2xl overflow-hidden" style={{ border: `2px solid ${PAL.frameSoft}`, background: '#fff' }}>
+                    {avatar ? <img src={avatar} className="w-full h-full object-cover" alt="" loading="lazy" draggable={false} /> : <div className="w-full h-full flex items-center justify-center text-lg" style={{ color: PAL.fade }}>✦</div>}
+                </div>
+                {multiChar && <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-[8px]" style={{ background: PAL.cream, border: `1.5px solid ${PAL.frame}`, color: PAL.ink }}>⇄</span>}
             </button>
-            <span className="flex-1" />
-            <span className="text-[11px] font-bold tracking-[0.06em]">Lv.{level}</span>
-            <span className="text-[9px] opacity-40">✦</span>
-            <span className="text-[11px] font-bold tracking-[0.06em]">D+{days}</span>
-            {unread > 0 && (
-                <>
-                    <span className="text-[9px] opacity-40">✦</span>
-                    <span className="text-[11px] font-bold" style={{ color: '#c2564e' }}>♥×{unread > 99 ? '99' : unread}</span>
-                </>
-            )}
+            <div className="flex-1 min-w-0" style={{ fontFamily: FONT_PX, color: PAL.ink }}>
+                <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[19px] font-bold tabular-nums tracking-[0.06em]">{hh}:{mm}</span>
+                    <span className="text-[15px] font-bold tracking-wide shrink-0">Lv.{level}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2 mt-0.5">
+                    <span className="text-[13px] truncate tracking-wide" style={{ color: PAL.fade }}>{charName}</span>
+                    <span className="text-[10px] shrink-0" style={{ color: PAL.heart }}>✦</span>
+                </div>
+                {/* 爱心经验条 */}
+                <div className="flex items-center gap-1.5 mt-1.5">
+                    <span className="text-[11px] leading-none" style={{ color: PAL.heart }}>♥</span>
+                    <div className="flex-1 h-[6px] rounded-full overflow-hidden" style={{ background: 'rgba(179,163,224,0.22)' }}>
+                        <div className="h-full rounded-full" style={{ width: `${expPct}%`, background: `linear-gradient(90deg, ${PAL.heart}, ${PAL.heartDeep})` }} />
+                    </div>
+                </div>
+            </div>
         </div>
     )
 );
@@ -125,17 +134,42 @@ const StageItem = React.memo<{ item: RoomItem }>(({ item }) => (
     </div>
 ));
 
-// ─── 角色（呼吸 / 游荡 / 戳一戳 / 深夜睡觉），自治状态不外溢 ─────
-const Actor = React.memo<{ actorImg: string | undefined; phase: DayPhase; sleepX: number; sleepY: number; unread: number; lastMessage: string; onChat: () => void }>(
-    ({ actorImg, phase, sleepX, sleepY, unread, lastMessage, onChat }) => {
+// ─── 天窗挂饰（参考稿：舞台顶部小窗 + 悬星，纯静态 CSS）────────────
+const StageWindow = React.memo(() => (
+    <div className="absolute top-[4%] left-[5%] right-[5%] h-[13%] pointer-events-none" style={{ zIndex: 0 }}>
+        <div className="absolute inset-0 rounded-xl overflow-hidden" style={{ border: '3px solid rgba(255,255,255,0.85)', background: 'linear-gradient(180deg, #bfe0f7 0%, #dff0fc 70%, #f0f8fe 100%)' }}>
+            {/* 云朵（静态圆角块，无 blur） */}
+            <div className="absolute top-[28%] left-[12%] w-[26%] h-[36%] rounded-full" style={{ background: 'rgba(255,255,255,0.85)' }} />
+            <div className="absolute top-[18%] left-[22%] w-[18%] h-[34%] rounded-full" style={{ background: 'rgba(255,255,255,0.75)' }} />
+            <div className="absolute top-[42%] right-[16%] w-[22%] h-[32%] rounded-full" style={{ background: 'rgba(255,255,255,0.7)' }} />
+            <span className="absolute top-[12%] right-[38%] text-[9px]" style={{ color: '#fff' }}>✦</span>
+        </div>
+        {/* 悬挂的小星星 / 月亮 */}
+        {[
+            { x: '18%', drop: 14, char: '⭐', size: 11 },
+            { x: '46%', drop: 22, char: '✦', size: 10 },
+            { x: '64%', drop: 12, char: '💫', size: 10 },
+            { x: '86%', drop: 26, char: '🌙', size: 12 },
+        ].map((s, i) => (
+            <div key={i} className="absolute top-full flex flex-col items-center" style={{ left: s.x }}>
+                <span style={{ width: 1, height: s.drop, background: PAL.frameSoft }} />
+                <span className="leading-none select-none" style={{ fontSize: s.size, color: PAL.fade }}>{s.char}</span>
+            </div>
+        ))}
+    </div>
+));
+
+// ─── 角色（呼吸 / 游荡 / 戳一戳念聊天台词 / 夜间飘 Zzz），自治状态不外溢 ─
+const Actor = React.memo<{ actorImg: string | undefined; night: boolean; pokeLines: string[]; unread: number; onChat: () => void }>(
+    ({ actorImg, night, pokeLines, unread, onChat }) => {
         const [pos, setPos] = useState({ x: 48, y: 80 });
         const [bounce, setBounce] = useState(false);
         const [pokeText, setPokeText] = useState('');
-        const night = phase === 'night';
+        const pokeIdx = useRef(0); // 台词按顺序循环（最新一条开始往回念）
 
-        // 游荡：≥18s 一次性的 setTimeout 链（无 rAF / 无短 interval），夜里归位睡觉
+        // 游荡：≥18s 一次性的 setTimeout 链（无 rAF / 无短 interval），夜里停下休息
         useEffect(() => {
-            if (night) { setPos({ x: sleepX, y: sleepY }); return; }
+            if (night) return;
             let t: ReturnType<typeof setTimeout>;
             const wander = () => {
                 setPos({ x: 22 + Math.random() * 56, y: 70 + Math.random() * 22 });
@@ -143,22 +177,22 @@ const Actor = React.memo<{ actorImg: string | undefined; phase: DayPhase; sleepX
             };
             t = setTimeout(wander, 15000);
             return () => clearTimeout(t);
-        }, [night, sleepX, sleepY]);
+        }, [night]);
 
         const poke = (e: React.MouseEvent) => {
             e.stopPropagation();
-            if (night) { setPokeText('Zzz…(睡着了)'); }
-            else {
-                setBounce(true);
-                setPokeText(POKE_LINES[Math.floor(Math.random() * POKE_LINES.length)]);
-                setTimeout(() => setBounce(false), 450);
-            }
-            setTimeout(() => setPokeText(''), 2800);
+            setBounce(true);
+            setTimeout(() => setBounce(false), 450);
+            // 从聊天里 ta 最近的回复按顺序循环取一条；一条没有就用兜底短语
+            const lines = pokeLines.length > 0 ? pokeLines : POKE_FALLBACK;
+            setPokeText(lines[pokeIdx.current % lines.length]);
+            pokeIdx.current += 1;
+            setTimeout(() => setPokeText(''), 3200);
         };
 
-        // 气泡优先级：戳一戳 > 夜间 Zzz > 未读 > 最近一条消息
-        const bubble = pokeText || (night ? 'Zzz…' : (unread > 0 ? `♥ ${unread} 条新消息!` : (lastMessage ? lastMessage.slice(0, 30) : '')));
-        const bubbleIsChat = !pokeText && !night;
+        // 气泡优先级：戳一戳台词 > 未读提醒
+        const bubble = pokeText || (unread > 0 ? `♥ ${unread} 条新消息!` : '');
+        const bubbleIsChat = !pokeText && unread > 0;
 
         return (
             <div onClick={poke}
@@ -173,17 +207,16 @@ const Actor = React.memo<{ actorImg: string | undefined; phase: DayPhase; sleepX
                     className="w-full h-auto object-contain select-none"
                     style={{
                         animation: bounce ? 'tama-bounce 0.45s ease-out' : (night ? 'none' : 'tama-breathe 3.2s ease-in-out infinite'),
-                        transform: night ? 'rotate(-6deg)' : undefined,
                         willChange: 'transform',
                     }} />
                 {night && (
-                    <span className="absolute -top-4 right-0 text-[13px] font-bold select-none" style={{ fontFamily: FONT_PX, color: PAL.lcdInk, animation: 'tama-zzz 2.6s ease-in-out infinite' }}>Zzz</span>
+                    <span className="absolute -top-4 right-0 text-[13px] font-bold select-none" style={{ fontFamily: FONT_PX, color: PAL.ink, animation: 'tama-zzz 2.6s ease-in-out infinite' }}>Zzz</span>
                 )}
                 {bubble && (
                     <div onClick={(e) => { if (bubbleIsChat) { e.stopPropagation(); onChat(); } }}
-                        className="absolute bottom-[102%] left-1/2 -translate-x-1/2 px-2.5 py-1.5 rounded-lg rounded-bl-none max-w-[170px] animate-pop-in"
-                        style={{ background: PAL.lcd, border: `2px solid ${PAL.ink}`, zIndex: 60 }}>
-                        <p className="text-[10px] font-bold leading-snug break-words whitespace-nowrap overflow-hidden text-ellipsis" style={{ fontFamily: FONT_PX, color: PAL.lcdInk }}>{bubble}</p>
+                        className="absolute bottom-[102%] left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-xl rounded-bl-none max-w-[180px] animate-pop-in"
+                        style={{ background: PAL.cream, border: `2px solid ${PAL.frame}`, zIndex: 60 }}>
+                        <p className="text-[10px] font-bold leading-snug break-words" style={{ fontFamily: FONT_PX, color: PAL.ink }}>{bubble}</p>
                     </div>
                 )}
             </div>
@@ -191,76 +224,88 @@ const Actor = React.memo<{ actorImg: string | undefined; phase: DayPhase; sleepX
     }
 );
 
-// ─── 小屋舞台（LCD 屏）：props 全为原始值/memo 引用，分钟跳动不进来 ───
+// ─── 右上角小电子钟：白天=天空底，夜里=星空底 +「夜深啦！」──────────
+const StageClock = React.memo<{ hh: string; mm: string; night: boolean }>(({ hh, mm, night }) => (
+    <div className="absolute top-2 right-2 z-[72] rounded-xl px-2.5 py-1.5 pointer-events-none select-none"
+        style={{
+            border: '2px solid rgba(255,255,255,0.85)',
+            background: night
+                ? `linear-gradient(160deg, ${PAL.night} 0%, #575083 100%)`
+                : 'linear-gradient(160deg, #bfe0f7 0%, #e8f5fd 100%)',
+        }}>
+        {night && (
+            <>
+                <span className="absolute top-[3px] left-[7px] text-[6px]" style={{ color: '#efe8b8' }}>✦</span>
+                <span className="absolute bottom-[4px] right-[8px] text-[5px]" style={{ color: '#cdc6f0' }}>✦</span>
+            </>
+        )}
+        <div className="flex items-center gap-1.5" style={{ fontFamily: FONT_PX }}>
+            <span className="text-[11px] leading-none">{night ? '🌙' : '☁️'}</span>
+            <div className="leading-none">
+                <div className="text-[12px] font-bold tabular-nums tracking-[0.06em]" style={{ color: night ? '#f5f2ff' : PAL.ink }}>{hh}:{mm}</div>
+                {night && <div className="text-[8px] mt-[2px] tracking-wide" style={{ color: '#cdc6f0', fontFamily: FONT_CN }}>夜深啦！</div>}
+            </div>
+        </div>
+    </div>
+));
+
+// ─── 小屋舞台：props 全为原始值/memo 引用，分钟跳动只更新角落电子钟 ───
 const RoomStage = React.memo<{
     items: RoomItem[]; wallStyle: string; floorStyle: string;
-    actorImg: string | undefined; phase: DayPhase; unread: number; lastMessage: string;
+    actorImg: string | undefined; night: boolean; pokeLines: string[]; unread: number;
+    hh: string; mm: string;
     onVisit: () => void; onChat: () => void;
-}>(({ items, wallStyle, floorStyle, actorImg, phase, unread, lastMessage, onVisit, onChat }) => {
-    // 睡觉位：找「床」，没有就找地毯，再没有就右下角
-    const sleep = useMemo(() => {
-        const bed = items.find(i => /床|bed/i.test(i.name)) || items.find(i => i.type === 'rug');
-        return bed ? { x: bed.x, y: Math.max(FLOOR_HORIZON + 8, Math.min(96, bed.y - 2)) } : { x: 62, y: 84 };
-    }, [items]);
+}>(({ items, wallStyle, floorStyle, actorImg, night, pokeLines, unread, hh, mm, onVisit, onChat }) => (
+    <div onClick={onVisit}
+        className="relative flex-1 min-h-0 rounded-[1.7rem] overflow-hidden cursor-pointer active:opacity-95"
+        style={{ border: `2.5px solid ${PAL.frame}`, boxShadow: `0 0 0 5px rgba(179,163,224,0.16)`, contain: 'layout paint' }}>
+        {/* 墙 / 地板（与 RoomApp 同分割线） */}
+        <div className="absolute top-0 left-0 w-full h-[65%] z-0" style={{ background: wallStyle }} />
+        <div className="absolute bottom-0 left-0 w-full h-[35%] z-0" style={{ background: floorStyle }} />
+        <div className="absolute top-[65%] w-full h-6 bg-gradient-to-b from-black/10 to-transparent pointer-events-none z-0" />
+        <StageWindow />
 
-    return (
-        <div onClick={onVisit}
-            className="relative flex-1 min-h-0 rounded-[1.6rem] overflow-hidden cursor-pointer active:opacity-95"
-            style={{ border: `3px solid ${PAL.ink}`, boxShadow: '0 6px 0 rgba(74,66,56,0.18)', contain: 'layout paint' }}>
-            {/* 墙 / 地板（与 RoomApp 同分割线） */}
-            <div className="absolute top-0 left-0 w-full h-[65%] z-0" style={{ background: wallStyle }} />
-            <div className="absolute bottom-0 left-0 w-full h-[35%] z-0" style={{ background: floorStyle }} />
-            <div className="absolute top-[65%] w-full h-6 bg-gradient-to-b from-black/10 to-transparent pointer-events-none z-0" />
+        {items.map(item => <StageItem key={item.id} item={item} />)}
 
-            {items.map(item => <StageItem key={item.id} item={item} />)}
+        <Actor actorImg={actorImg} night={night} pokeLines={pokeLines} unread={unread} onChat={onChat} />
 
-            <Actor actorImg={actorImg} phase={phase} sleepX={sleep.x} sleepY={sleep.y} unread={unread} lastMessage={lastMessage} onChat={onChat} />
-
-            {/* 暮色 / 夜色叠层：常驻两个静态渐变 div，只动 opacity（合成器通道） */}
-            <div className="absolute inset-0 pointer-events-none z-[70] transition-opacity duration-1000"
-                style={{ background: 'linear-gradient(180deg, rgba(255,148,84,0.16), rgba(120,66,120,0.2))', opacity: phase === 'dusk' ? 1 : 0 }} />
-            <div className="absolute inset-0 pointer-events-none z-[70] transition-opacity duration-1000"
-                style={{ background: 'linear-gradient(180deg, rgba(24,32,72,0.4), rgba(16,18,48,0.5))', opacity: phase === 'night' ? 1 : 0 }} />
-            {/* LCD 扫描线（静态，几乎零成本） */}
-            <div className="absolute inset-0 pointer-events-none z-[71]"
-                style={{ background: 'repeating-linear-gradient(0deg, rgba(74,66,56,0.05) 0px, rgba(74,66,56,0.05) 1px, transparent 1px, transparent 3px)' }} />
-            {/* 屏角像素装饰 */}
-            <span className="absolute top-1.5 left-2.5 text-[9px] z-[72] pointer-events-none select-none" style={{ fontFamily: FONT_PX, color: 'rgba(74,66,56,0.4)' }}>▶ LIVE</span>
+        {/* ✦LIVE 徽标 + 角落电子钟 */}
+        <div className="absolute top-2 left-2 z-[72] rounded-lg px-2 py-[3px] pointer-events-none select-none"
+            style={{ background: PAL.creamSoft, border: `1.5px solid ${PAL.frameSoft}` }}>
+            <span className="text-[9px] font-bold tracking-[0.14em]" style={{ fontFamily: FONT_PX, color: PAL.ink }}>✦ LIVE</span>
         </div>
-    );
-});
+        <StageClock hh={hh} mm={mm} night={night} />
+    </div>
+));
 
-// ─── 糖果实体键 ────────────────────────────────────────────────
-const CandyKey: React.FC<{ id: AppID; label: string; top: string; deep: string; badge?: number; onClick: () => void }> = ({ id, label, top, deep, badge = 0, onClick }) => {
-    const iconKey = INSTALLED_APPS.find(a => a.id === id)?.icon || 'Settings';
-    const Comp = Icons[iconKey] || Icons.Settings;
-    return (
-        <button onClick={onClick} className="flex flex-col items-center gap-1.5 group">
-            <div className="relative w-[3.7rem] h-[3.7rem] rounded-full flex items-center justify-center transition-transform group-active:translate-y-[3px]"
-                style={{
-                    background: `linear-gradient(180deg, ${top}, ${deep})`,
-                    border: `2.5px solid ${PAL.ink}`,
-                    boxShadow: `0 4px 0 ${PAL.ink}`,
-                }}>
-                {/* 键帽内高光（静态渐变，非阴影） */}
-                <div className="absolute top-[5px] left-1/2 -translate-x-1/2 w-[62%] h-[26%] rounded-full pointer-events-none" style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0))' }} />
-                <div className="w-7 h-7 text-white"><Comp className="w-full h-full" /></div>
-                {badge > 0 && (
-                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
-                        style={{ background: PAL.hot, border: `2px solid ${PAL.ink}` }}>{badge > 99 ? '99+' : badge}</span>
-                )}
-            </div>
-            <span className="text-[11px]" style={{ fontFamily: FONT_CN, color: PAL.ink }}>{label}</span>
-        </button>
-    );
+// ─── 底部五键 dock（参考稿：CARE / TALK / HOME / ALBUM / SETTINGS）───
+const DOCK_GLYPHS: Record<string, React.ReactNode> = {
+    heart: <svg viewBox="0 0 24 24" className="w-full h-full" fill="#fff"><path d="M12 21s-7.5-4.9-9.8-9.2C.7 8.9 2.4 5.4 5.7 5.1c1.9-.2 3.7.8 4.7 2.4h3.2c1-1.6 2.8-2.6 4.7-2.4 3.3.3 5 3.8 3.5 6.7C19.5 16.1 12 21 12 21z" transform="scale(0.92) translate(1,1)" /></svg>,
+    talk: <svg viewBox="0 0 24 24" className="w-full h-full" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3c-1.4 0-2.8-.3-4-.9L3 20l1.2-4.3a8 8 0 0 1-1.2-4.2A8.4 8.4 0 0 1 11.5 3.2 8.4 8.4 0 0 1 21 11.5z" /><circle cx="8.5" cy="11.5" r="0.6" fill="#fff" /><circle cx="12" cy="11.5" r="0.6" fill="#fff" /><circle cx="15.5" cy="11.5" r="0.6" fill="#fff" /></svg>,
+    home: <svg viewBox="0 0 24 24" className="w-full h-full" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 11.5 12 4l9 7.5" /><path d="M5.5 10v9h13v-9" /><path d="M10 19v-5h4v5" /></svg>,
+    album: <svg viewBox="0 0 24 24" className="w-full h-full" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="3.5" width="16" height="17" rx="2.5" /><path d="M8 3.5v17" /><path d="M14.2 8.4l.9 1.9 2 .3-1.5 1.4.4 2-1.8-1-1.8 1 .4-2-1.5-1.4 2-.3z" fill="#fff" stroke="none" /></svg>,
+    gear: <svg viewBox="0 0 24 24" className="w-full h-full" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.5a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.5h4l.4-2.5a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z" /></svg>,
 };
+
+const DockKey: React.FC<{ glyph: string; label: string; tint: string; badge?: number; onClick: () => void }> = ({ glyph, label, tint, badge = 0, onClick }) => (
+    <button onClick={onClick} className="flex flex-col items-center gap-1 active:scale-90 transition-transform">
+        <div className="relative w-10 h-10 rounded-xl flex items-center justify-center"
+            style={{ background: tint, border: `2px solid rgba(255,255,255,0.75)`, boxShadow: `0 2px 6px ${PAL.frameSoft}` }}>
+            <div className="w-5 h-5">{DOCK_GLYPHS[glyph]}</div>
+            {badge > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[17px] h-[17px] px-1 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
+                    style={{ background: PAL.heartDeep, border: '1.5px solid #fff' }}>{badge > 99 ? '99+' : badge}</span>
+            )}
+        </div>
+        <span className="text-[9px] font-bold tracking-[0.1em]" style={{ fontFamily: FONT_PX, color: PAL.ink }}>{label}</span>
+    </button>
+);
 
 // ─── 主组件 ───────────────────────────────────────────────────
 const TamagotchiHome: React.FC = () => {
     const { openApp, characters, activeCharacterId, setActiveCharacterId, virtualTime, unreadMessages, isDataLoaded, lastMsgTimestamp } = useOS();
 
-    const [stat, setStat] = useState({ msgCount: 0, firstTs: 0 });
-    const [lastMessage, setLastMessage] = useState('');
+    const [stat, setStat] = useState<{ msgCount: number; pokeLines: string[] }>({ msgCount: 0, pokeLines: [] });
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [devDebugVisible, setDevDebugVisible] = useState(() => isDevDebugAvailable());
     useEffect(() => subscribeDevDebugAvailability(setDevDebugVisible), []);
@@ -270,15 +315,19 @@ const TamagotchiHome: React.FC = () => {
         [characters, activeCharacterId]
     );
 
-    // 取数口径与 MobileGameHome 一致：消息数（Lv）、最早消息（认识天数）、最近一条可见消息
+    // 取数：消息数（Lv/经验条）+ ta 最近 30 条文字回复（戳一戳台词，最新在前按顺序循环）
     useEffect(() => {
-        if (!isDataLoaded || !char) { setStat({ msgCount: 0, firstTs: 0 }); setLastMessage(''); return; }
+        if (!isDataLoaded || !char) { setStat({ msgCount: 0, pokeLines: [] }); return; }
         DB.getMessagesByCharId(char.id).then(msgs => {
             const visible = msgs.filter(m => m.role !== 'system');
-            setStat({ msgCount: visible.length, firstTs: visible[0]?.timestamp || 0 });
-            const last = visible[visible.length - 1];
-            const clean = last ? last.content.replace(/\[.*?\]/g, '').trim() : '';
-            setLastMessage(clean || (last?.type === 'image' ? '[图片]' : ''));
+            const lines = visible
+                .filter(m => m.role === 'assistant')
+                .map(m => m.content.replace(/\[.*?\]/g, '').trim())
+                .filter(t => t.length > 0)
+                .slice(-30)
+                .reverse()
+                .map(t => t.length > 42 ? t.slice(0, 42) + '…' : t);
+            setStat({ msgCount: visible.length, pokeLines: lines });
         }).catch(() => {});
     }, [char?.id, lastMsgTimestamp, isDataLoaded]);
 
@@ -297,13 +346,13 @@ const TamagotchiHome: React.FC = () => {
     const wallStyle = getBgStyle(wallImg, char?.roomConfig?.wallScale, char?.roomConfig?.wallRepeat, FALLBACK_WALL);
     const floorStyle = getBgStyle(floorImg, char?.roomConfig?.floorScale, char?.roomConfig?.floorRepeat, FALLBACK_FLOOR);
 
-    const phase = phaseOfHour(virtualTime.hours);
+    const night = isNightHour(virtualTime.hours);
     const hh = virtualTime.hours.toString().padStart(2, '0');
     const mm = virtualTime.minutes.toString().padStart(2, '0');
-    const level = deriveLevel(stat.msgCount);
-    const days = stat.firstTs ? Math.max(1, Math.floor((Date.now() - stat.firstTs) / 86400000) + 1) : 1;
-    const charUnread = char ? (unreadMessages[char.id] || 0) : 0;
+    const { level, exp, expMax } = deriveStats(stat.msgCount);
+    const expPct = Math.min(100, Math.round((exp / expMax) * 100));
     const totalUnread = useMemo(() => Object.values(unreadMessages).reduce((a, b) => a + b, 0), [unreadMessages]);
+    const charUnread = char ? (unreadMessages[char.id] || 0) : 0;
 
     const openRoom = useCallback(() => openApp(AppID.Room), [openApp]);
     const openChat = useCallback(() => openApp(AppID.Chat), [openApp]);
@@ -319,8 +368,8 @@ const TamagotchiHome: React.FC = () => {
     );
 
     return (
-        <div className="h-full w-full relative z-10 overflow-hidden select-none flex flex-col px-5"
-            style={{ color: PAL.ink, fontFamily: FONT_CN, paddingTop: 'calc(var(--safe-top, 0px) + 0.75rem)', paddingBottom: 'calc(var(--safe-bottom, 0px) + 1rem)' }}>
+        <div className="h-full w-full relative z-10 overflow-hidden select-none flex flex-col px-4"
+            style={{ color: PAL.ink, fontFamily: FONT_CN, paddingTop: 'calc(var(--safe-top, 0px) + 0.75rem)', paddingBottom: 'calc(var(--safe-bottom, 0px) + 0.9rem)' }}>
             {/* 本皮肤专用 keyframes（只碰 transform/opacity） */}
             <style>{`
                 @keyframes tama-breathe { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
@@ -328,65 +377,80 @@ const TamagotchiHome: React.FC = () => {
                 @keyframes tama-zzz { 0%,100% { opacity: 0.35; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-4px); } }
             `}</style>
 
-            {/* ===== 报头 ===== */}
+            {/* ===== 报头（小头像 + 品牌字 + ⋯）===== */}
             <div className="flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-1.5" style={{ fontFamily: FONT_PX }}>
-                    <span className="text-[11px]" style={{ color: PAL.peachDeep }}>✦</span>
-                    <span className="text-[12px] font-bold tracking-[0.28em]">SULLY·GOTCHI</span>
-                    <span className="text-[9px]" style={{ color: PAL.mintDeep }}>✦</span>
+                <div className="flex items-center gap-2 min-w-0" style={{ fontFamily: FONT_PX }}>
+                    {char && (
+                        <div className="w-8 h-8 rounded-full overflow-hidden shrink-0" style={{ border: `2px solid ${PAL.frameSoft}`, background: '#fff' }}>
+                            <img src={char.avatar} className="w-full h-full object-cover" alt="" loading="lazy" draggable={false} />
+                        </div>
+                    )}
+                    <span className="text-[10px]" style={{ color: PAL.heart }}>✦</span>
+                    <span className="text-[13px] font-bold tracking-[0.26em] truncate" style={{ color: PAL.ink, textShadow: '0 1px 0 rgba(255,255,255,0.8)' }}>SULLY·GOTCHI</span>
+                    <span className="text-[9px] shrink-0" style={{ color: PAL.fade }}>✦</span>
                 </div>
                 <button onClick={() => setDrawerOpen(true)} aria-label="全部应用"
-                    className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
-                    style={{ background: PAL.cream, border: `2px solid ${PAL.ink}`, boxShadow: `0 2.5px 0 ${PAL.ink}` }}>
-                    <span className="text-[15px] font-bold leading-none tracking-widest" style={{ fontFamily: FONT_PX }}>⋯</span>
+                    className="w-10 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform shrink-0"
+                    style={{ background: PAL.cream, border: `2px solid ${PAL.frame}` }}>
+                    <span className="text-[15px] font-bold leading-none tracking-widest" style={{ fontFamily: FONT_PX, color: PAL.ink }}>⋯</span>
                 </button>
             </div>
 
             {char ? (
                 <>
-                    <PixelStatusBar hh={hh} mm={mm} level={level} days={days} unread={charUnread} charName={char.name} multiChar={characters.length > 1} onSwitch={switchChar} />
+                    <StatusCard hh={hh} mm={mm} level={level} expPct={expPct} charName={char.name} avatar={char.avatar} multiChar={characters.length > 1} onSwitch={switchChar} />
 
-                    {/* ===== 液晶屏 · 小屋舞台 ===== */}
+                    {/* ===== 小屋舞台 ===== */}
                     <div className="flex-1 min-h-0 flex flex-col mt-3">
                         <RoomStage
                             items={items} wallStyle={wallStyle} floorStyle={floorStyle}
-                            actorImg={actorImg} phase={phase} unread={charUnread} lastMessage={lastMessage}
+                            actorImg={actorImg} night={night} pokeLines={stat.pokeLines} unread={charUnread}
+                            hh={hh} mm={mm}
                             onVisit={openRoom} onChat={openChat}
                         />
                         <div className="text-center text-[9px] mt-1.5 tracking-[0.3em] shrink-0" style={{ fontFamily: FONT_PX, color: PAL.fade }}>
-                            ◂ TAP SCREEN TO VISIT ▸
+                            ✦ TAP SCREEN TO VISIT ✦
                         </div>
                     </div>
 
-                    {/* ===== 四颗糖果实体键 ===== */}
-                    <div className="shrink-0 flex items-start justify-around pt-3">
-                        <CandyKey id={AppID.Date} label="见面" top={PAL.peach} deep={PAL.peachDeep} onClick={() => openApp(AppID.Date)} />
-                        <CandyKey id={AppID.Chat} label="聊天" top={PAL.mint} deep={PAL.mintDeep} badge={totalUnread} onClick={openChat} />
-                        <CandyKey id={AppID.Room} label="小小窝" top={PAL.butter} deep={PAL.butterDeep} onClick={openRoom} />
-                        <CandyKey id={AppID.MemoryPalace} label="记忆宫殿" top={PAL.lav} deep={PAL.lavDeep} onClick={() => openApp(AppID.MemoryPalace)} />
+                    {/* ===== 五键 dock：CARE / TALK / HOME / ALBUM / SETTINGS ===== */}
+                    <div className="shrink-0 rounded-2xl px-3 pt-2 pb-1.5 mt-1 flex items-end justify-between"
+                        style={{ background: PAL.creamSoft, border: `2px solid ${PAL.frame}` }}>
+                        <DockKey glyph="heart" label="CARE" tint={PAL.care} onClick={() => openApp(AppID.Date)} />
+                        <DockKey glyph="talk" label="TALK" tint={PAL.talk} badge={totalUnread} onClick={openChat} />
+                        {/* 中央 HOME：参考稿里独立小框、略微抬高 */}
+                        <button onClick={openRoom} className="flex flex-col items-center gap-1 -mt-5 active:scale-95 transition-transform">
+                            <div className="w-[3.4rem] h-[3.4rem] rounded-2xl flex items-center justify-center"
+                                style={{ background: PAL.cream, border: `2px solid ${PAL.frame}`, boxShadow: `0 3px 8px ${PAL.frameSoft}`, color: PAL.ink }}>
+                                <div className="w-7 h-7">{DOCK_GLYPHS.home}</div>
+                            </div>
+                            <span className="text-[9px] font-bold tracking-[0.1em]" style={{ fontFamily: FONT_PX, color: PAL.ink }}>HOME</span>
+                        </button>
+                        <DockKey glyph="album" label="ALBUM" tint={PAL.album} onClick={() => openApp(AppID.MemoryPalace)} />
+                        <DockKey glyph="gear" label="SETTINGS" tint={PAL.album} onClick={() => openApp(AppID.Settings)} />
                     </div>
                 </>
             ) : (
                 /* 零角色兜底：像素小蛋 */
                 <div className="flex-1 flex flex-col items-center justify-center gap-4">
                     <div className="w-24 h-28 rounded-[50%_50%_46%_46%/58%_58%_42%_42%]"
-                        style={{ background: `linear-gradient(180deg, ${PAL.cream}, ${PAL.butter})`, border: `3px solid ${PAL.ink}`, animation: 'tama-breathe 2.4s ease-in-out infinite' }} />
+                        style={{ background: `linear-gradient(180deg, ${PAL.cream}, #e8ddfb)`, border: `2.5px solid ${PAL.frame}`, animation: 'tama-breathe 2.4s ease-in-out infinite' }} />
                     <p className="text-[12px] text-center leading-relaxed" style={{ fontFamily: FONT_PX, color: PAL.fade }}>EMPTY EGG…</p>
                     <button onClick={() => openApp(AppID.Character)} className="px-5 py-2.5 rounded-2xl text-[13px] font-bold text-white active:scale-95 transition-transform"
-                        style={{ background: `linear-gradient(180deg, ${PAL.mint}, ${PAL.mintDeep})`, border: `2.5px solid ${PAL.ink}`, boxShadow: `0 3px 0 ${PAL.ink}`, fontFamily: FONT_CN }}>
+                        style={{ background: `linear-gradient(180deg, ${PAL.heart}, ${PAL.heartDeep})`, border: `2px solid rgba(255,255,255,0.7)`, fontFamily: FONT_CN }}>
                         去神经链接领养一只
                     </button>
                 </div>
             )}
 
-            {/* ===== 全部应用抽屉（逃生舱口：设置 / 外观都在这） ===== */}
+            {/* ===== 全部应用抽屉（逃生舱口：外观 / 全部 App 都在这） ===== */}
             {drawerOpen && (
-                <div className="absolute inset-0 z-40 flex flex-col animate-fade-in" style={{ background: 'rgba(251,244,228,0.97)' }} onClick={() => setDrawerOpen(false)}>
+                <div className="absolute inset-0 z-40 flex flex-col animate-fade-in" style={{ background: 'rgba(240,235,250,0.97)' }} onClick={() => setDrawerOpen(false)}>
                     <div className="flex items-center justify-between px-6" style={{ paddingTop: 'calc(var(--safe-top, 0px) + 1.25rem)', paddingBottom: '0.5rem' }}>
                         <h2 className="text-lg tracking-wide" style={{ fontFamily: FONT_CN, color: PAL.ink }}>全部应用</h2>
                         <button onClick={(e) => { e.stopPropagation(); setDrawerOpen(false); }} aria-label="关闭"
                             className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
-                            style={{ background: '#fff', border: `2px solid ${PAL.ink}` }}>
+                            style={{ background: '#fff', border: `2px solid ${PAL.frame}` }}>
                             <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke={PAL.ink} strokeWidth="2.5"><path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" /></svg>
                         </button>
                     </div>
