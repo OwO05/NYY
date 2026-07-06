@@ -20,6 +20,10 @@ export const roomLaunch = {
     request(intent: RoomLaunchIntent): void {
         pending = intent;
     },
+    /** 只读，不清空——供 useState 惰性初始化把首帧就渲染成目标视图（避免闪一下 select）。 */
+    peek(): RoomLaunchIntent | null {
+        return pending;
+    },
     /** 取出并清空（只应用一次，避免下次进小屋还残留旧意图）。 */
     consume(): RoomLaunchIntent | null {
         const v = pending;

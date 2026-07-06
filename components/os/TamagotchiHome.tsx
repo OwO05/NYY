@@ -389,6 +389,11 @@ const Actor = React.memo<{
             }
         }, [say?.seq]);
 
+        // 戳一戳的爱心迸射（趣味）：一次性 CSS 动画，飘完即卸；连戳攒 combo。
+        const [hearts, setHearts] = useState<{ id: number; dx: number }[]>([]);
+        const heartSeq = useRef(0);
+        const comboRef = useRef({ n: 0, t: 0 });
+
         const poke = (e: React.MouseEvent) => {
             e.stopPropagation();
             setBounce(true);
@@ -398,6 +403,14 @@ const Actor = React.memo<{
             setPokeText(lines[pokeIdx.current % lines.length]);
             pokeIdx.current += 1;
             setTimeout(() => setPokeText(''), 3200);
+            // 迸射 2-3 颗爱心（连戳越快越多，最多 5 颗）
+            const nowT = performance.now?.() ?? 0;
+            comboRef.current = nowT - comboRef.current.t < 900 ? { n: comboRef.current.n + 1, t: nowT } : { n: 1, t: nowT };
+            const count = Math.min(5, 2 + Math.floor(comboRef.current.n / 2));
+            const burst = Array.from({ length: count }, () => ({ id: heartSeq.current++, dx: Math.round((Math.random() - 0.5) * 44) }));
+            setHearts(prev => [...prev, ...burst]);
+            const ids = new Set(burst.map(b => b.id));
+            setTimeout(() => setHearts(prev => prev.filter(h => !ids.has(h.id))), 1100);
         };
 
         // 气泡优先级：戳一戳台词 > 未读提醒
@@ -423,6 +436,12 @@ const Actor = React.memo<{
                     <span className="absolute -top-4 right-0 text-[13px] font-bold select-none" style={{ fontFamily: FONT_PX, color: PAL.ink, animation: 'tama-zzz 2.6s ease-in-out infinite' }}>Zzz</span>
                 )}
 
+                {/* 戳一戳迸射的爱心（一次性上浮，飘完卸载） */}
+                {hearts.map(h => (
+                    <span key={h.id} className="absolute left-1/2 top-[30%] pointer-events-none leading-none"
+                        style={{ color: PAL.hot, fontSize: 13, ['--dx' as any]: `${h.dx}px`, animation: 'tama-heart 1.05s ease-out forwards', textShadow: '0 0 6px var(--tg-hotglow60)' }}>♥</span>
+                ))}
+
                 {/* 思绪光点：ta 有心声时头顶飘一朵小云（点开才展开成思绪云；不点只是光点） */}
                 {!night && heartLine && !bubble && !thoughtOpen && (
                     <button onClick={(e) => { e.stopPropagation(); setThoughtOpen(true); setTimeout(() => setThoughtOpen(false), 8000); }}
@@ -436,30 +455,38 @@ const Actor = React.memo<{
                         </svg>
                     </button>
                 )}
+
+                {/* 气泡「居中锚点」：left:50% + translateX(-50%) 静态放这层，绝不带动画——
+                    动画（pop-in 用 transform:scale）放到内层子元素，避免 scale 覆盖掉居中
+                    位移导致「先蹦到右边、再瞬移回中间」的抖动。 */}
                 {thoughtOpen && heartLine && (
-                    <div onClick={(e) => { e.stopPropagation(); setThoughtOpen(false); }}
-                        className="absolute bottom-[104%] left-1/2 -translate-x-1/2 w-max max-w-[240px] px-3.5 py-2.5 rounded-[18px] animate-pop-in"
-                        style={{ background: 'rgba(255,255,255,0.96)', border: `2px dashed ${PAL.frame}`, boxShadow: '0 4px 14px var(--tg-glow35)', zIndex: 61 }}>
-                        <p className="text-[10px] leading-[1.7] break-words" style={{ fontFamily: FONT_CN, color: PAL.grape, fontStyle: 'italic' }}>{heartLine}</p>
-                        {/* 思绪云的小泡泡尾巴 */}
-                        <span className="absolute -bottom-2 left-[38%] w-2.5 h-2.5 rounded-full" style={{ background: 'rgba(255,255,255,0.96)', border: `1.5px dashed ${PAL.frame}` }} />
-                        <span className="absolute -bottom-4 left-[32%] w-1.5 h-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.96)', border: `1px dashed ${PAL.frame}` }} />
+                    <div className="absolute bottom-[104%] left-1/2 z-[61]" style={{ transform: 'translateX(-50%)' }}>
+                        <div onClick={(e) => { e.stopPropagation(); setThoughtOpen(false); }}
+                            className="relative w-max max-w-[240px] px-3.5 py-2.5 rounded-[18px] animate-pop-in"
+                            style={{ background: 'rgba(255,255,255,0.96)', border: `2px dashed ${PAL.frame}`, boxShadow: '0 4px 14px var(--tg-glow35)', transformOrigin: 'bottom center' }}>
+                            <p className="text-[10px] leading-[1.7] break-words" style={{ fontFamily: FONT_CN, color: PAL.grape, fontStyle: 'italic' }}>{heartLine}</p>
+                            <span className="absolute -bottom-2 left-[38%] w-2.5 h-2.5 rounded-full" style={{ background: 'rgba(255,255,255,0.96)', border: `1.5px dashed ${PAL.frame}` }} />
+                            <span className="absolute -bottom-4 left-[32%] w-1.5 h-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.96)', border: `1px dashed ${PAL.frame}` }} />
+                        </div>
                     </div>
                 )}
 
                 {bubble && (
-                    <div onClick={(e) => { if (bubbleIsChat) { e.stopPropagation(); onChat(); } }}
-                        className="absolute bottom-[102%] left-1/2 -translate-x-1/2 w-max max-w-[230px] px-3 py-1.5 rounded-xl rounded-bl-none animate-pop-in"
-                        style={{ background: PAL.cream, border: `2px solid ${PAL.frame}`, boxShadow: '0 3px 10px var(--tg-glow25)', zIndex: 60 }}>
-                        <p className="text-[10px] font-bold leading-snug break-words" style={{ fontFamily: FONT_PX, color: PAL.ink }}>{bubble}</p>
+                    <div className="absolute bottom-[102%] left-1/2 z-[60]" style={{ transform: 'translateX(-50%)' }}>
+                        <div onClick={(e) => { if (bubbleIsChat) { e.stopPropagation(); onChat(); } }}
+                            className="relative w-max max-w-[230px] px-3 py-1.5 rounded-xl rounded-bl-none animate-pop-in"
+                            style={{ background: PAL.cream, border: `2px solid ${PAL.frame}`, boxShadow: '0 3px 10px var(--tg-glow25)', transformOrigin: 'bottom center' }}>
+                            <p className="text-[10px] font-bold leading-snug break-words" style={{ fontFamily: FONT_PX, color: PAL.ink }}>{bubble}</p>
+                        </div>
                     </div>
                 )}
 
                 {/* 状态小签：ta 此刻在做什么（跟着小人走，游戏 NPC 头顶状态那味儿） */}
                 {activity && !night && (
-                    <div className="absolute top-[101%] left-1/2 -translate-x-1/2 px-2 py-[2px] rounded-full whitespace-nowrap pointer-events-none"
-                        style={{ background: 'rgba(255,255,255,0.85)', border: `1.5px solid ${PAL.frameSoft}`, boxShadow: '0 2px 6px var(--tg-glow16)' }}>
-                        <span className="text-[8.5px] font-bold" style={{ fontFamily: FONT_CN, color: PAL.ink }}>{activity}</span>
+                    <div className="absolute top-[101%] left-1/2 whitespace-nowrap pointer-events-none" style={{ transform: 'translateX(-50%)' }}>
+                        <div className="px-2 py-[2px] rounded-full" style={{ background: 'rgba(255,255,255,0.85)', border: `1.5px solid ${PAL.frameSoft}`, boxShadow: '0 2px 6px var(--tg-glow16)' }}>
+                            <span className="text-[8.5px] font-bold" style={{ fontFamily: FONT_CN, color: PAL.ink }}>{activity}</span>
+                        </div>
                     </div>
                 )}
             </div>
@@ -873,7 +900,7 @@ const TamagotchiHome: React.FC = () => {
     const openChat = useCallback(() => openApp(AppID.Chat), [openApp]);
     // 世界化入口：带意图打开小屋 App（RoomApp 挂载时消费，落到对应分区 / 开梦境）
     const openHomeland = useCallback(() => { roomLaunch.request({ tab: 'worldHome' }); openApp(AppID.Room); }, [openApp]);
-    const openPixelHome = useCallback(() => { roomLaunch.request({ tab: 'pixelHome' }); openApp(AppID.Room); }, [openApp]);
+    const openPixelHome = useCallback(() => { roomLaunch.request({ tab: 'pixelHome', charId: char?.id }); openApp(AppID.Room); }, [char, openApp]);
     const openDream = useCallback(() => { if (char) { roomLaunch.request({ charId: char.id, openDream: true }); openApp(AppID.Room); } }, [char, openApp]);
     const switchChar = useCallback(() => {
         if (characters.length < 2 || !char) return;
@@ -913,6 +940,7 @@ const TamagotchiHome: React.FC = () => {
                 @keyframes tama-twinkle { 0%,100% { opacity: 0.25; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.1); } }
                 @keyframes tama-drift { 0% { transform: translateX(-4%); } 100% { transform: translateX(5%); } }
                 @keyframes tama-swing { 0%,100% { transform: rotate(-2.2deg); } 50% { transform: rotate(2.2deg); } }
+                @keyframes tama-heart { 0% { opacity: 0; transform: translate(-50%, 0) scale(0.5); } 25% { opacity: 1; } 100% { opacity: 0; transform: translate(calc(-50% + var(--dx, 0px)), -46px) scale(1.1); } }
             `}</style>
 
             {/* ===== 报头（浮在房间墙上，一整条贴纸，清爽）：头像切角色 · 名字 · 时间/Lv/心条 · 调色 ===== */}
