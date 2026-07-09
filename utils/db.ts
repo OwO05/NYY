@@ -16,7 +16,7 @@ import { exportMcdLocal, importMcdLocal } from './mcdMcpClient';
 import { exportWorldHomeLocal, importWorldHomeLocal } from './worldHome/localBackup';
 
 const DB_NAME = 'AetherOS_Data';
-const DB_VERSION = 64; // Bumped: v64 ensure worlds / world_episodes stores exist（v63 漏建：已到 v63 的库不会再触发 upgrade，补一版重建）
+const DB_VERSION = 66; // Bumped: v66 消化日志 digest_reports（v65 房间门牌 room_plates）
 
 const STORE_CHARACTERS = 'characters';
 const STORE_MESSAGES = 'messages';
@@ -372,6 +372,18 @@ export const openDB = (): Promise<IDBDatabase> => {
       if (!db.objectStoreNames.contains('event_boxes')) {
           const ebStore = db.createObjectStore('event_boxes', { keyPath: 'id' });
           ebStore.createIndex('charId', 'charId', { unique: false });
+      }
+
+      // ─── 房间门牌（v65 新增，情景→语义固化层） ───────
+      if (!db.objectStoreNames.contains('room_plates')) {
+          const rpStore = db.createObjectStore('room_plates', { keyPath: 'id' });
+          rpStore.createIndex('charId', 'charId', { unique: false });
+      }
+
+      // ─── 消化日志（v66 新增，认知消化可回看记录） ─────
+      if (!db.objectStoreNames.contains('digest_reports')) {
+          const drStore = db.createObjectStore('digest_reports', { keyPath: 'id' });
+          drStore.createIndex('charId', 'charId', { unique: false });
       }
 
       // ─── v48 一次性强制清空记忆宫殿（EventBox 体系，旧 boxId 数据不兼容） ───
@@ -2430,6 +2442,7 @@ export const DB = {
           STORE_VR_NOVELS, STORE_VR_ANNOTATIONS, STORE_CC_PARTS, STORE_VR_MUSIC, STORE_VR_GUESTBOOK, STORE_VR_SCRIPTS, STORE_VR_PLAYS, STORE_VR_PRESETS, STORE_VR_LETTERS, STORE_VR_SETTINGS,
           STORE_WORLDS, STORE_WORLD_EPISODES,
           'memory_nodes', 'memory_vectors', 'memory_links', 'topic_boxes', 'anticipations', 'event_boxes',
+          'room_plates', 'digest_reports',
           'memory_batches', 'pixel_home_assets', 'pixel_home_layouts'
       ].filter(name => db.objectStoreNames.contains(name));
 
@@ -2499,6 +2512,8 @@ export const DB = {
           data.topicBoxes !== undefined,
           data.anticipations !== undefined,
           data.eventBoxes !== undefined,
+          data.roomPlates !== undefined,
+          data.digestReports !== undefined,
           data.memoryBatches !== undefined,
           data.dailySchedules !== undefined,
           data.handbooks !== undefined,
@@ -2901,6 +2916,14 @@ export const DB = {
           await clearAndAdd('event_boxes', data.eventBoxes, '事件盒', false);
           data.eventBoxes = undefined as any;
       }, data.eventBoxes?.length || 0);
+      await runSection('房间门牌', data.roomPlates !== undefined, async () => {
+          await clearAndAdd('room_plates', data.roomPlates, '房间门牌', false);
+          data.roomPlates = undefined as any;
+      }, data.roomPlates?.length || 0);
+      await runSection('消化日志', data.digestReports !== undefined, async () => {
+          await clearAndAdd('digest_reports', data.digestReports, '消化日志', false);
+          data.digestReports = undefined as any;
+      }, data.digestReports?.length || 0);
       await runSection('记忆批次', data.memoryBatches !== undefined, async () => {
           await clearAndAdd('memory_batches', data.memoryBatches, '记忆批次', false);
           data.memoryBatches = undefined as any;
