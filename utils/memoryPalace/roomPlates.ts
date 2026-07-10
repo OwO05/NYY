@@ -188,6 +188,7 @@ async function callPlateLLM(
     plates: RoomPlate[],
     materials: PlateMaterial[],
     llmConfig: LightLLMConfig,
+    identity: { personaBrief: string; userBio: string },
 ): Promise<PlateLLMItem[]> {
     const materialByRoom = new Map(materials.map(m => [m.room, m.lines]));
 
@@ -211,7 +212,14 @@ ${existingBlock}
 ${materialBlock}`;
     }).join('\n\n');
 
-    const systemPrompt = `你是 ${charName}。你现在在独处，安静地整理自己的"底色认知"——那些不需要刻意回忆就知道的事：关于 ${userName}、关于你自己、关于你们之间。
+    const systemPrompt = `你是 ${charName}。${identity.personaBrief ? `你的人设摘要：
+${identity.personaBrief}
+
+` : ''}${userName} 是与你朝夕相处的人${identity.userBio ? `（TA 的自述：${identity.userBio}）` : ''}。下面的材料全部来自你们相处的记忆。
+
+你现在在独处，安静地整理自己的"底色认知"——那些不需要刻意回忆就知道的事：关于 ${userName}、关于你自己、关于你们之间。
+
+【身份确认】「${userName}的事」只写 ${userName} 的事实；「我是谁」只写你（${charName}）自己；不要张冠李戴——材料里"我"是你，"TA/${userName}"是对方。
 
 下面每个"门牌"给出了现有条目和新材料。请为每个门牌输出**完整的新条目列表**：
 
@@ -333,9 +341,21 @@ async function consolidatePlates(
         return { updated: [] };
     }
 
+    // 身份上下文：整理 LLM 需要知道"我是谁、TA是谁"才不会张冠李戴——
+    // 尤其是回填场景，材料横跨几个月，没有人设参照时蒸馏视角会飘
+    const identity = { personaBrief: '', userBio: '' };
+    try {
+        const { DB } = await import('../db');
+        const chars = await DB.getAllCharacters();
+        const profile = chars.find((c: { id: string }) => c.id === charId);
+        if (profile?.systemPrompt) identity.personaBrief = String(profile.systemPrompt).slice(0, 400);
+        const up = await DB.getUserProfile();
+        if (up?.bio) identity.userBio = String(up.bio).replace(/\s+/g, ' ').slice(0, 200);
+    } catch { /* 拿不到就裸跑，prompt 里仍有名字 */ }
+
     let items: PlateLLMItem[] = [];
     try {
-        items = await callPlateLLM(charName, userName, plates, materials, llmConfig);
+        items = await callPlateLLM(charName, userName, plates, materials, llmConfig, identity);
     } catch (e: any) {
         console.warn(`🚪 [RoomPlate] LLM 整理调用失败: ${e?.message || e}`);
     }
@@ -505,9 +525,12 @@ export async function bootstrapPlatesFromHistory(
         maxBatches?: number;
         /** 历史总行数低于此值直接跳过（常规整理足以覆盖小历史，不值得跑回填） */
         minLines?: number;
+        /** 断点续传：从第几批开始（0 起）。历史近似 append-only + 稳定排序，批次边界跨次稳定 */
+        startBatch?: number;
+        /** 进度回调：done/total 都是全量口径（绝对批次序号 / 总批数） */
         onProgress?: (done: number, total: number) => void;
     } = {},
-): Promise<{ updated: PlateRoom[]; batches: number; totalLines: number }> {
+): Promise<{ updated: PlateRoom[]; batches: number; totalLines: number; neededBatches: number; nextBatch: number; complete: boolean }> {
     const allNodes = await MemoryNodeDB.getByCharId(charId);
     const byRoom = new Map<PlateRoom, string[]>();
     let totalLines = 0;
@@ -520,34 +543,55 @@ export async function bootstrapPlatesFromHistory(
         totalLines += lines.length;
     }
     if (totalLines === 0 || totalLines < (options.minLines ?? 0)) {
-        return { updated: [], batches: 0, totalLines };
+        return { updated: [], batches: 0, totalLines, neededBatches: 0, nextBatch: 0, complete: false };
     }
 
     const neededBatches = Math.max(
         ...PLATE_ROOMS.map(r => Math.ceil((byRoom.get(r)!.length) / BOOTSTRAP_LINES_PER_BATCH)),
     );
-    const batches = Math.min(neededBatches, options.maxBatches ?? neededBatches);
-    if (batches < neededBatches) {
-        console.log(`🚪 [Bootstrap] 批数受限 ${batches}/${neededBatches}——先吃最早的历史，剩余可手动触发补完`);
+    const startBatch = Math.max(0, Math.min(options.startBatch ?? 0, neededBatches));
+    const endBatch = Math.min(neededBatches, startBatch + (options.maxBatches ?? neededBatches));
+    if (startBatch > 0 || endBatch < neededBatches) {
+        console.log(`🚪 [Bootstrap] 本次跑第 ${startBatch + 1}~${endBatch} 批（共 ${neededBatches} 批）——没跑完的部分下次续传`);
     }
 
     const updatedSet = new Set<PlateRoom>();
-    for (let i = 0; i < batches; i++) {
+    let ran = 0;
+    let nextBatch = startBatch;
+    for (let i = startBatch; i < endBatch; i++) {
         const materials: PlateMaterial[] = PLATE_ROOMS.map(room => ({
             room,
             lines: byRoom.get(room)!.slice(i * BOOTSTRAP_LINES_PER_BATCH, (i + 1) * BOOTSTRAP_LINES_PER_BATCH),
         }));
-        if (materials.every(m => m.lines.length === 0)) break;
+        if (materials.every(m => m.lines.length === 0)) { nextBatch = i + 1; continue; }
         try {
             const { updated } = await consolidatePlates(charId, charName, userName || '用户', materials, llmConfig);
             updated.forEach(r => updatedSet.add(r));
         } catch (e: any) {
-            console.warn(`🚪 [Bootstrap] 第 ${i + 1}/${batches} 批整理失败（继续下一批）: ${e?.message || e}`);
+            console.warn(`🚪 [Bootstrap] 第 ${i + 1}/${neededBatches} 批整理失败（继续下一批）: ${e?.message || e}`);
         }
-        options.onProgress?.(i + 1, batches);
+        ran++;
+        nextBatch = i + 1;
+        options.onProgress?.(i + 1, neededBatches);
     }
-    console.log(`🚪 [Bootstrap] 回填完成：${batches} 批 / ${totalLines} 条历史 → 更新 ${[...updatedSet].length} 块门牌`);
-    return { updated: [...updatedSet], batches, totalLines };
+    const complete = nextBatch >= neededBatches;
+    console.log(`🚪 [Bootstrap] 本次 ${ran} 批 / 进度 ${nextBatch}/${neededBatches}${complete ? '（已还清）' : ''} → 更新 ${[...updatedSet].length} 块门牌`);
+    return { updated: [...updatedSet], batches: ran, totalLines, neededBatches, nextBatch, complete };
+}
+
+// 回填进度（断点续传）：跑一半关页面/自动限批没跑完时，从这里接着还
+const BOOTSTRAP_PROGRESS_KEY = (charId: string) => `mp_plateBootstrapBatch_${charId}`;
+export function getBootstrapResume(charId: string): number {
+    try {
+        const v = parseInt(localStorage.getItem(BOOTSTRAP_PROGRESS_KEY(charId)) || '0', 10);
+        return isNaN(v) || v < 0 ? 0 : v;
+    } catch { return 0; }
+}
+export function setBootstrapResume(charId: string, nextBatch: number): void {
+    try { localStorage.setItem(BOOTSTRAP_PROGRESS_KEY(charId), String(nextBatch)); } catch {}
+}
+export function clearBootstrapResume(charId: string): void {
+    try { localStorage.removeItem(BOOTSTRAP_PROGRESS_KEY(charId)); } catch {}
 }
 
 /** 门牌是否全空（自动回填的触发判据之一） */

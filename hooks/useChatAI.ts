@@ -1333,7 +1333,12 @@ export const useChatAI = ({
                             console.log(`🧠 [AutoDigest] 已达 50 轮，自动触发认知消化...`);
                             setMemoryPalaceStatus(`${charName}闭上眼睛，开始整理内心…`);
                             const persona = [char.systemPrompt || '', char.worldview || ''].filter(Boolean).join('\n');
-                            const result = await runCognitiveDigestion(char.id, charName, persona, mpLLM, false, userProfile?.name, mpEmb);
+                            const result = await runCognitiveDigestion(
+                                char.id, charName, persona, mpLLM, false, userProfile?.name, mpEmb,
+                                // 消化链路可能含多次 LLM 调用（审视→历史回填续传→门牌整理），
+                                // 实时刷状态条让用户知道后台在干活、别急着关页面
+                                (stage) => setMemoryPalaceStatus(`${charName}${stage}`),
+                            );
                             if (result) {
                                 // 自我领悟不再追加到 char.selfInsights（只进不出的旧常驻层）——
                                 // 归宿已改为 self_room 门牌（digestion 内部提交），这里只负责弹窗昭告
