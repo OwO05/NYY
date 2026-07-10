@@ -10,7 +10,7 @@ import {
     wipeAllMemoryPalace,
     exportMemoryPalace, importMemoryPalace, isMemoryPalaceExportFile,
     DigestReportDB, PLATE_TITLES,
-    bootstrapPlatesFromHistory, markPlateBootstrapDone,
+    bootstrapPlatesFromHistory, markPlateBootstrapDone, clearBootstrapResume,
 } from '../utils/memoryPalace';
 import type { Anticipation, MigrationProgress, DigestResult, MemoryLink, EventBox, DigestReport } from '../utils/memoryPalace';
 import { confirmExportSafety } from '../utils/exportGuard';
@@ -505,10 +505,15 @@ export default function MemoryPalaceApp() {
         setBootstrapping(true);
         setBootstrapStatus(null);
         try {
+            // 手动 = 从头全量重跑：清掉自动路径留下的续传进度
+            clearBootstrapResume(char.id);
             const result = await bootstrapPlatesFromHistory(char.id, char.name, userProfile?.name, lightApi, {
-                onProgress: (done, total) => setBootstrapStatus(`正在整理第 ${done}/${total} 批历史记忆…`),
+                onProgress: (done, total) => setBootstrapStatus(`正在整理第 ${done}/${total} 批历史记忆…（请留在本页）`),
             });
-            markPlateBootstrapDone(char.id);
+            if (result.complete) {
+                markPlateBootstrapDone(char.id);
+                clearBootstrapResume(char.id);
+            }
             setBootstrapStatus(result.totalLines === 0
                 ? '记忆宫殿里还没有可立牌的历史'
                 : `[ok]扫过 ${result.totalLines} 条历史（${result.batches} 批），更新 ${result.updated.length} 块门牌——去神经链接「门牌」页看看`);
@@ -1434,7 +1439,10 @@ export default function MemoryPalaceApp() {
         try {
             const persona = [char.systemPrompt || '', char.worldview || ''].filter(Boolean).join('\n');
             const embApi = memoryPalaceConfig.embedding;
-            const result = await runCognitiveDigestion(char.id, char.name, persona, lightApi, true, userProfile?.name, embApi);
+            const result = await runCognitiveDigestion(
+                char.id, char.name, persona, lightApi, true, userProfile?.name, embApi,
+                (stage) => setDigestResult(stage), // 审视→回填续传→整理门牌, 逐阶段刷给用户看
+            );
             if (!result) {
                 setDigestResult('没有需要消化的内容');
             } else {
@@ -1453,6 +1461,7 @@ export default function MemoryPalaceApp() {
                 if (result.worries?.length) parts.push(`${result.worries.length} 条回看担忧`);
                 if (result.aspirations?.length) parts.push(`${result.aspirations.length} 个新期盼`);
                 if (result.distilled?.length) parts.push(`${result.distilled.length} 条沉淀到门牌`);
+                if (result.plateUpdated?.length) parts.push(`${result.plateUpdated.length} 块门牌更新`);
                 setDigestResult(parts.length > 0 ? `[ok]${parts.join('，')}` : '没有变化');
             }
             loadStats();
