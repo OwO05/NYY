@@ -157,9 +157,11 @@ export function mergePlateEntries(
 
 const ROOM_RULES: Record<PlateRoom, string> = {
     user_room:
-        `关于对方的**稳定事实**：家庭结构、成长经历、居住状况、身份职业、健康、忌讳雷区，` +
-        `以及常被提起的重要他人（人物条目格式如「TA的朋友小美：大学室友，关系好，上月闹过矛盾已和好」）。` +
-        `瞬时状态（今天累、这周忙）不收；正在进行中、还没有结论的事（在找工作、在备考）不收——那是事件盒的事，等有了结果再入。`,
+        `想象你在为对方写一张**角色卡**——只有必须写在卡上的内容才配上这块门牌：` +
+        `基础信息（身份、职业大方向、居住）、家庭结构、重要他人（人物条目格式如「TA的朋友小美：大学室友，关系铁」）、` +
+        `长期相处沉淀下来的核心事实、以及重大到足以塑造TA这个人的人生节点（亲人离世、迁居他国这种量级）。` +
+        `【入卡门槛极高，宁缺毋滥】阶段性状态（最近很累、工作糟心）不收；情绪分析、性格侧写不收——那是印象档案的领域；` +
+        `正在进行、没有结论的事不收——那是事件盒的事，等有了结果再说。`,
     self_room:
         `我对**自己**的稳定认知：我是谁、性格底色、重要的转变、已经内化的领悟。不收对他人的看法。`,
     bedroom:
@@ -253,10 +255,66 @@ ${roomBlocks}
 }
 
 /**
+ * 解析消化提交的候选行："[家庭] 父母离异……" → { tag: '家庭', text: '父母离异……' }。
+ * 无前缀则整行作 text。
+ */
+export function parseSubmissionLine(line: string): { text: string; tag?: string } {
+    const m = /^\s*[\[【]([^\]】]{1,6})[\]】]\s*(.+)$/s.exec(line || '');
+    if (m) return { tag: m[1].trim(), text: m[2].trim() };
+    return { text: (line || '').trim() };
+}
+
+/**
+ * 送达保证兜底：LLM 整理没跑成（报错/输出解析为空）时，把消化刚提交的候选
+ * **机械并入**门牌——同文本去重、容量上限、卧室命名过滤照常，不做改写重排。
+ * 没有这一步，候选会静默蒸发：消化日志记着"已提交"，门牌上却什么都没有
+ * （提交的源节点已打 digestedAt，不会再来第二次）。下轮整理 LLM 会重排这些条目。
+ */
+async function fallbackMergeSubmissions(
+    plates: RoomPlate[],
+    submissions: Partial<Record<PlateRoom, string[]>>,
+    now: number,
+): Promise<PlateRoom[]> {
+    const updated: PlateRoom[] = [];
+    for (const plate of plates) {
+        const lines = submissions[plate.room];
+        if (!lines || lines.length === 0) continue;
+        const seen = new Set(plate.entries.map(e => e.text));
+        let added = 0;
+        for (const line of lines) {
+            if (plate.entries.length >= PLATE_ENTRY_CAPS[plate.room]) break;
+            const { text: rawText, tag } = parseSubmissionLine(line);
+            const text = rawText.replace(/\s+/g, ' ').trim().slice(0, PLATE_ENTRY_HARD_MAX_CHARS);
+            if (!text || seen.has(text)) continue;
+            if (plate.room === 'bedroom' && violatesBedroomRule(text)) continue;
+            seen.add(text);
+            plate.entries.push({
+                id: generateEntryId(),
+                text,
+                tag,
+                firstLearnedAt: now,
+                updatedAt: now,
+                sourceCount: 1,
+            });
+            added++;
+        }
+        if (added > 0) {
+            plate.updatedAt = now;
+            plate.version += 1;
+            await RoomPlateDB.save(plate);
+            updated.push(plate.room);
+            console.warn(`🚪 [RoomPlate] 兜底并入「${PLATE_TITLES[plate.room]}」${added} 条候选（LLM 整理未跑成）`);
+        }
+    }
+    return updated;
+}
+
+/**
  * 核心流程：加载目标门牌 → LLM 整理 → 合并落库。
  *
  * LLM 输出里**一个条目都没提到的房间**跳过保存——区分"LLM 决定清空"
  * 和"LLM 忘了这个房间/输出被截断"，宁可保守不动，等下轮消化再整理。
+ * LLM 整体失败/输出为空时，prioritySubmissions（消化刚提交的候选）走机械兜底并入。
  */
 async function consolidatePlates(
     charId: string,
@@ -264,6 +322,7 @@ async function consolidatePlates(
     userName: string,
     materials: PlateMaterial[],
     llmConfig: LightLLMConfig,
+    prioritySubmissions?: Partial<Record<PlateRoom, string[]>>,
 ): Promise<{ updated: PlateRoom[] }> {
     const rooms = materials.map(m => m.room);
     const plates = await Promise.all(rooms.map(r => loadOrCreatePlate(charId, r)));
@@ -274,17 +333,26 @@ async function consolidatePlates(
         return { updated: [] };
     }
 
-    const items = await callPlateLLM(charName, userName, plates, materials, llmConfig);
+    let items: PlateLLMItem[] = [];
+    try {
+        items = await callPlateLLM(charName, userName, plates, materials, llmConfig);
+    } catch (e: any) {
+        console.warn(`🚪 [RoomPlate] LLM 整理调用失败: ${e?.message || e}`);
+    }
     if (items.length === 0) {
         console.warn(`🚪 [RoomPlate] LLM 未返回有效条目，门牌保持不动`);
+        if (prioritySubmissions) {
+            return { updated: await fallbackMergeSubmissions(plates, prioritySubmissions, Date.now()) };
+        }
         return { updated: [] };
     }
 
     const now = Date.now();
     const updated: PlateRoom[] = [];
+    const skippedPlates: RoomPlate[] = [];
     for (const plate of plates) {
         const roomItems = items.filter(i => i.room === plate.room);
-        if (roomItems.length === 0) continue;
+        if (roomItems.length === 0) { skippedPlates.push(plate); continue; }
         const mergedEntries = mergePlateEntries(plate.room, plate.entries, roomItems, now);
         plate.entries = mergedEntries;
         plate.updatedAt = now;
@@ -292,6 +360,12 @@ async function consolidatePlates(
         await RoomPlateDB.save(plate);
         updated.push(plate.room);
         console.log(`🚪 [RoomPlate] 「${PLATE_TITLES[plate.room]}」v${plate.version}：${mergedEntries.length} 条`);
+    }
+    // 半失败态：LLM 只给部分房间输出了条目。没被提到的房间若有本次提交的候选，
+    // 同样机械兜底并入——按房间粒度保证送达。
+    if (prioritySubmissions && skippedPlates.length > 0) {
+        const rescued = await fallbackMergeSubmissions(skippedPlates, prioritySubmissions, now);
+        updated.push(...rescued);
     }
     return { updated };
 }
@@ -380,7 +454,8 @@ export async function consolidateAllPlates(
             lines: [...extra, ...pickMaterialLines(allNodes, room, sinceTs)],
         };
     });
-    return consolidatePlates(charId, charName, userName || '用户', materials, llmConfig);
+    // extraMaterial 同时作为 prioritySubmissions 传入：LLM 整理失败时机械兜底并入，不许蒸发
+    return consolidatePlates(charId, charName, userName || '用户', materials, llmConfig, extraMaterial);
 }
 
 // ─── 注入：格式化为常驻 System Prompt 段落 ───────────

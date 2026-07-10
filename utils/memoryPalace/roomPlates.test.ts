@@ -4,6 +4,7 @@ import {
     violatesBedroomRule,
     formatRoomPlatesSection,
     pickMaterialLines,
+    parseSubmissionLine,
 } from './roomPlates';
 import type { MemoryNode, PlateEntry, RoomPlate } from './types';
 import { PLATE_ENTRY_CAPS, PLATE_ENTRY_HARD_MAX_CHARS } from './types';
@@ -159,6 +160,26 @@ describe('pickMaterialLines — 门牌原料挑选（recency 窗口 + 锚点）'
         expect(lines).toHaveLength(15);
         expect(lines).not.toContain('内容-archived');
         expect(lines).not.toContain('内容-other_room');
+    });
+});
+
+describe('parseSubmissionLine — 消化候选行解析', () => {
+    it('带方括号前缀 → 拆出 tag 和正文', () => {
+        expect(parseSubmissionLine('[家庭] 父母离异，由外婆和母亲带大'))
+            .toEqual({ tag: '家庭', text: '父母离异，由外婆和母亲带大' });
+        expect(parseSubmissionLine('【重要他人】小美：大学室友'))
+            .toEqual({ tag: '重要他人', text: '小美：大学室友' });
+    });
+
+    it('无前缀 → 整行作正文', () => {
+        expect(parseSubmissionLine('我允许自己在她面前卸下坚硬的壳'))
+            .toEqual({ text: '我允许自己在她面前卸下坚硬的壳' });
+    });
+
+    it('前缀超长（>6字）不当 tag，整行作正文', () => {
+        const line = '[这是一个非常长的前缀] 正文';
+        expect(parseSubmissionLine(line).tag).toBeUndefined();
+        expect(parseSubmissionLine(line).text).toBe(line);
     });
 });
 

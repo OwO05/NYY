@@ -3862,6 +3862,11 @@ create table if not exists memory_vectors (
                                                         门牌已更新：{report.plateUpdated.map(r => (PLATE_TITLES as Record<string, string>)[r] || r).join('、')}
                                                     </div>
                                                 )}
+                                                {submitCount > 0 && report.plateUpdated.length === 0 && (
+                                                    <div style={{ fontSize: 10, color: '#f59e0b', marginTop: 6 }}>
+                                                        ⚠️ 本次提交的候选未合并进门牌（整理未跑成或未被采纳）
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </div>
