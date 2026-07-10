@@ -14,6 +14,7 @@ import { DB } from '../utils/db';
 import { creatorPartToBlobRefs, loadCreatorPartsForRender } from '../utils/creatorPartsBlob';
 import { CharacterProfile, SpecialMomentRecord } from '../types';
 import { safeResponseJson } from '../utils/safeApi';
+import { assetMirrors, attachAudioMirrorFallback } from '../utils/assetUrl';
 import {
     runLike520CallA,
     runLike520CallB,
@@ -2493,7 +2494,8 @@ const LetterView: React.FC<{ text: string; onNext: () => void; onClose: () => vo
  * 1200×780 左右的横版 520 DAY 装饰框（蕾丝 doily + 爱心/星星/小花），
  * 中间是空白的圆形 doily，让两个 chibi 居中靠下排进去。
  */
-const LIKE520_PHOTO_BG_URL = 'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/img/2.png';
+// 拼图合影底图（仓库相对路径，多 CDN 镜像兜底）。canvas 需 CORS，各 CDN 均返回 CORS 头。
+const LIKE520_PHOTO_BG_PATH = 'img/2.png';
 
 async function composePuzzlePhoto(charChibiUrl: string, userChibiUrl: string): Promise<string> {
     const load = (src: string): Promise<HTMLImageElement> => new Promise((resolve, reject) => {
@@ -2503,8 +2505,13 @@ async function composePuzzlePhoto(charChibiUrl: string, userChibiUrl: string): P
         img.onerror = reject;
         img.src = src;
     });
+    // 底图逐个镜像试，拉到就用；用户 chibi 是本机数据、无镜像可切，直接 load。
+    const loadFirst = async (mirrors: string[]): Promise<HTMLImageElement> => {
+        for (const u of mirrors) { try { return await load(u); } catch { /* 换下一个镜像 */ } }
+        throw new Error('拼图底图全部镜像加载失败');
+    };
     const [bg, charImg, userImg] = await Promise.all([
-        load(LIKE520_PHOTO_BG_URL),
+        loadFirst(assetMirrors(LIKE520_PHOTO_BG_PATH)),
         load(charChibiUrl),
         load(userChibiUrl),
     ]);
@@ -2791,28 +2798,12 @@ type BGMGroupKey = 'nieren' | 'yangcheng' | 'jieju' | 'letter';
  *   - letter    读信（letter）
  * 进入活动时各组随机抽一条预加载，phase 切换时在已抽的 4 条之间 crossfade。
  */
+// 仓库相对路径，经 attachAudioMirrorFallback 走多 CDN 镜像兜底（见 utils/assetUrl.ts）。
 const LIKE520_BGM_GROUPS: Record<BGMGroupKey, string[]> = {
-    nieren: [
-        'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/nieren/1.mp3',
-        'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/nieren/2.mp3',
-    ],
-    yangcheng: [
-        'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/yangcheng/1.mp3',
-        'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/yangcheng/2.mp3',
-        'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/yangcheng/3.mp3',
-        'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/yangcheng/4.mp3',
-    ],
-    jieju: [
-        'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/jiejuhezhao/1.mp3',
-        'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/jiejuhezhao/2.mp3',
-        'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/jiejuhezhao/3.mp3',
-    ],
-    letter: [
-        'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/letter/1.mp3',
-        'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/letter/2.mp3',
-        'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/letter/3.mp3',
-        'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/letter/4.mp3',
-    ],
+    nieren: ['bgm/nieren/1.mp3', 'bgm/nieren/2.mp3'],
+    yangcheng: ['bgm/yangcheng/1.mp3', 'bgm/yangcheng/2.mp3', 'bgm/yangcheng/3.mp3', 'bgm/yangcheng/4.mp3'],
+    jieju: ['bgm/jiejuhezhao/1.mp3', 'bgm/jiejuhezhao/2.mp3', 'bgm/jiejuhezhao/3.mp3'],
+    letter: ['bgm/letter/1.mp3', 'bgm/letter/2.mp3', 'bgm/letter/3.mp3', 'bgm/letter/4.mp3'],
 };
 
 const BGM_MUTED_KEY = 'sullyos_like520_bgm_muted';
@@ -2885,8 +2876,8 @@ function useLike520BGM(active: boolean, currentGroup: BGMGroupKey | null) {
 
         console.log('[520][BGM] init | muted=', mutedRef.current, '| HAS_BGM=', HAS_BGM);
         (Object.keys(LIKE520_BGM_GROUPS) as BGMGroupKey[]).forEach(key => {
-            const url = pickRandom(LIKE520_BGM_GROUPS[key]);
-            if (!url) return;
+            const path = pickRandom(LIKE520_BGM_GROUPS[key]);
+            if (!path) return;
             try {
                 const audio = new Audio();
                 audio.loop = true;
@@ -2895,11 +2886,13 @@ function useLike520BGM(active: boolean, currentGroup: BGMGroupKey | null) {
                 audio.addEventListener('error', () => console.warn(`[520][BGM] ${key} audio error`, audio.error?.code, audio.src));
                 audio.addEventListener('canplay', () => console.log(`[520][BGM] ${key} canplay`));
                 // 注：不设 crossOrigin —— HTMLAudioElement 普通播放不需要 CORS，
-                // 设了反而要求 CDN 必须返回 CORS 头，否则整段播放失败
-                audio.src = url;
+                // 设了反而要求 CDN 必须返回 CORS 头，否则整段播放失败。
+                // attachAudioMirrorFallback 设好首源并挂 error 兜底：加载失败自动切下一个 CDN 镜像。
+                // audio 一经创建即固定本组，生命周期内不换曲，兜底监听不会堆叠，无需解绑。
+                attachAudioMirrorFallback(audio, path);
                 audio.load();
                 audiosRef.current[key] = audio;
-                console.log(`[520][BGM] ${key} → ${url}`);
+                console.log(`[520][BGM] ${key} → ${audio.src}`);
             } catch (err) {
                 console.warn(`[520][BGM] failed to init ${key}:`, err);
             }

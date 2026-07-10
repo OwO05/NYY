@@ -10,6 +10,7 @@ import TheaterPanel from './theater/TheaterPanel';
 import { CreatorIframe, type ChibiResult } from '../components/Like520Event';
 import { useMusic, type Song } from '../context/MusicContext';
 import { DB } from '../utils/db';
+import { useResilientAssetUrl, attachAudioMirrorFallback } from '../utils/assetUrl';
 import { VRScheduler } from '../utils/vrWorld/scheduler';
 import { VR_ROOMS, getRoom, VR_DEFAULT_INTERVAL_MIN, SIGNAL_EPIGRAPH, signalActFor } from '../utils/vrWorld/constants';
 import { buildNovelAsync, groupAnnotationsBySeg, getBookmark } from '../utils/vrWorld/novel';
@@ -436,18 +437,19 @@ const VRWorldApp: React.FC = () => {
 
 // ============ 通用：CSS 房间场景背景 ============
 const RoomBackground: React.FC<{ roomId: VRRoomId; className?: string }> = ({ roomId, className }) => {
-    // 每个房间的插画底图（托管在 assets 仓库）。统一套一层"彼方"调性处理：
-    // 降饱和 + 压暗 + 轻柔化把图推远、弱化清晰度，再叠暗紫色洗 + 底部压暗 + 暗角，
-    // 让五个房间是一套风格、且立绘能跳出来。
+    // 每个房间的插画底图（仓库相对路径，经 assetUrl 走多 CDN 镜像兜底，见 utils/assetUrl.ts）。
+    // 统一套一层"彼方"调性处理：降饱和 + 压暗 + 轻柔化把图推远、弱化清晰度，
+    // 再叠暗紫色洗 + 底部压暗 + 暗角，让五个房间是一套风格、且立绘能跳出来。
     const ROOM_BG: Partial<Record<VRRoomId, string>> = {
-        library: 'https://raw.githubusercontent.com/qegj567-cloud/SullyOS-assets/main/img/BOOK.png',
-        music: 'https://raw.githubusercontent.com/qegj567-cloud/SullyOS-assets/main/img/MUSIC.png',
-        guestbook: 'https://raw.githubusercontent.com/qegj567-cloud/SullyOS-assets/main/img/PLAY.jpg',
-        postoffice: 'https://raw.githubusercontent.com/qegj567-cloud/SullyOS-assets/main/img/post.png',
-        gym: 'https://raw.githubusercontent.com/qegj567-cloud/SullyOS-assets/main/img/ALL.png',
-        theater: 'https://raw.githubusercontent.com/qegj567-cloud/SullyOS-assets/main/img/SHOW.png',
+        library: 'img/BOOK.png',
+        music: 'img/MUSIC.png',
+        guestbook: 'img/PLAY.jpg',
+        postoffice: 'img/post.png',
+        gym: 'img/ALL.png',
+        theater: 'img/SHOW.png',
     };
-    const bgUrl = ROOM_BG[roomId];
+    // hook 必须无条件调用：无底图的房间传 null，返回空串走下面的分支。
+    const bgUrl = useResilientAssetUrl(ROOM_BG[roomId] ?? null);
     if (bgUrl) {
         return (
             <div className={`absolute inset-0 overflow-hidden ${className || ''}`} style={{ background: '#0a0816' }}>
@@ -911,9 +913,10 @@ const ReplyComposeModal: React.FC<{ letter: VRLetter; defaultPen: string; initia
 // ============ 信号坠落处 · 顶部特殊活动 banner ============
 // 尽量照搬那张设计图：深空 + 金框四角 + 右侧书影 + 发光衬线标题 + 英文副名 + 副标题；
 // 右下角把「剩余时间倒计时」换成「已完成 x/20 首诗歌」的进度。点整块进入信号坠落处。
-// banner 底图：月（走 jsDelivr CDN，与 520 素材一致，国内更稳）
-const SIGNAL_BANNER_MOON = 'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/img/MOON.png';
+// banner 底图：月（仓库相对路径，经 assetUrl 走多 CDN 镜像兜底，见 utils/assetUrl.ts）
+const SIGNAL_BANNER_MOON = 'img/MOON.png';
 const SignalBanner: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
+    const moonUrl = useResilientAssetUrl(SIGNAL_BANNER_MOON);
     const [bk, setBk] = useState<SignalBooklet | null>(null);
     useEffect(() => {
         let alive = true;
@@ -929,7 +932,7 @@ const SignalBanner: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
         <button onClick={onOpen} className="relative w-full h-[132px] rounded-2xl overflow-hidden text-left active:scale-[0.985] transition-transform"
             style={{ boxShadow: '0 10px 34px rgba(0,0,0,.5)', border: '1px solid rgba(196,164,92,.35)' }}>
             {/* 底图：月 */}
-            <div className="absolute inset-0" style={{ backgroundImage: `url(${SIGNAL_BANNER_MOON})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+            <div className="absolute inset-0" style={{ backgroundImage: `url(${moonUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
             {/* 压暗 + 左侧加重，保证左侧文案在月面上可读 */}
             <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, rgba(8,6,22,.86) 0%, rgba(10,8,28,.6) 44%, rgba(10,8,30,.3) 100%)' }} />
             {/* 顶部光束 + 星尘 + 底部压暗 */}
@@ -1758,14 +1761,12 @@ const SignalAdminPanel: React.FC<{ onClose: () => void; addToast?: (m: string, t
 };
 
 // ── 信号坠落处 BGM：三幕各 2 首，进面板按「当前诗所处的幕」随机抽一首循环播放。
-// 走 jsDelivr CDN（与 520 特别活动的 BGM 植入方式一致）。仿 useLike520BGM 的淡入淡出 + 静音开关。
+// 仓库相对路径，经 attachAudioMirrorFallback 走多 CDN 镜像兜底（见 utils/assetUrl.ts）。
+// 仿 useLike520BGM 的淡入淡出 + 静音开关。
 const SIGNAL_BGM: Record<1 | 2 | 3, string[]> = {
-    1: ['https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/POEM/A01.mp3',
-        'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/POEM/A02.mp3'],
-    2: ['https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/POEM/B01.mp3',
-        'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/POEM/B02.mp3'],
-    3: ['https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/POEM/C01.mp3',
-        'https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/POEM/C03.mp3'],
+    1: ['bgm/POEM/A01.mp3', 'bgm/POEM/A02.mp3'],
+    2: ['bgm/POEM/B01.mp3', 'bgm/POEM/B02.mp3'],
+    3: ['bgm/POEM/C01.mp3', 'bgm/POEM/C03.mp3'],
 };
 const SIGNAL_BGM_MUTED_KEY = 'signal_bgm_muted';
 const SIGNAL_BGM_VOL = 0.32;
@@ -1775,6 +1776,7 @@ function useSignalBGM(active: boolean, actNo: 1 | 2 | 3 | null) {
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const loadedActRef = useRef<number | null>(null);
     const fadeRef = useRef<number | null>(null);
+    const detachFallbackRef = useRef<(() => void) | null>(null); // 上一次挂的镜像兜底监听，换曲/卸载前解绑
     const [muted, setMuted] = useState<boolean>(() => { try { return localStorage.getItem(SIGNAL_BGM_MUTED_KEY) === '1'; } catch { return false; } });
     const mutedRef = useRef(muted); mutedRef.current = muted;
 
@@ -1800,7 +1802,8 @@ function useSignalBGM(active: boolean, actNo: 1 | 2 | 3 | null) {
             const pool = SIGNAL_BGM[actNo] || [];
             if (!pool.length) return;
             loadedActRef.current = actNo;
-            a.src = pool[Math.floor(Math.random() * pool.length)];
+            detachFallbackRef.current?.(); // 解绑上一幕的镜像兜底监听，避免堆叠
+            detachFallbackRef.current = attachAudioMirrorFallback(a, pool[Math.floor(Math.random() * pool.length)]);
             a.volume = 0; a.load();
         }
         a.play().then(() => fadeTo(mutedRef.current ? 0 : SIGNAL_BGM_VOL)).catch(() => { /* autoplay 被拦：等下次交互 */ });
@@ -1809,6 +1812,7 @@ function useSignalBGM(active: boolean, actNo: 1 | 2 | 3 | null) {
     // 卸载清理
     useEffect(() => () => {
         if (fadeRef.current) clearInterval(fadeRef.current);
+        detachFallbackRef.current?.(); detachFallbackRef.current = null;
         const a = audioRef.current; if (a) { try { a.pause(); a.src = ''; } catch { /* ignore */ } }
         audioRef.current = null; loadedActRef.current = null;
     }, []);
