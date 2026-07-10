@@ -107,6 +107,8 @@ export interface DigestResult {
     worries: DigestEntry[];        // 回看经历产生的担忧→阁楼
     aspirations: DigestEntry[];    // 回看经历长出的新期盼→窗台
     distilled: DigestEntry[];      // 回看经历的二次领悟→门牌候选（category=目标门牌）
+    /** 本次消化实际更新的门牌房间（含回填/兜底），供 UI 摘要展示 */
+    plateUpdated?: string[];
 }
 
 // ─── 轮数计数 & 自动触发 ─────────────────────────────
@@ -115,24 +117,38 @@ export interface DigestResult {
 const AUTO_DIGEST_ROUNDS = 50;
 const ROUND_KEY = (charId: string) => `mp_digestRounds_${charId}`;
 const LAST_DIGEST_KEY = (charId: string) => `mp_lastDigest_${charId}`;
-/** 老用户自动回填：门牌全空 + 历史可观 + 没跑过 → 消化尾声先把积压立牌 */
+/**
+ * 老用户自动回填：历史欠账没还清（无完成标记）→ 消化尾声接着还。
+ * 断点续传：每次限 10 批（后台成本护栏），进度存 localStorage，跑一半
+ * 关页面/限批没跑完都能下次续上；全部批次跑完才打完成标记。
+ * 不再以"门牌全空"为条件——部分回填后门牌已非空，剩余欠账仍要还。
+ */
 async function maybeBootstrapPlates(
     charId: string,
     charName: string,
     userName: string | undefined,
     llmConfig: LightLLMConfig,
+    onProgress?: (stage: string) => void,
 ): Promise<PlateRoom[]> {
     try {
-        const { arePlatesEmpty, bootstrapPlatesFromHistory, isPlateBootstrapDone, markPlateBootstrapDone } = await import('./roomPlates');
+        const {
+            bootstrapPlatesFromHistory, isPlateBootstrapDone, markPlateBootstrapDone,
+            getBootstrapResume, setBootstrapResume, clearBootstrapResume,
+        } = await import('./roomPlates');
         if (isPlateBootstrapDone(charId)) return [];
-        if (!(await arePlatesEmpty(charId))) return [];
-        // 批数限 10（后台成本护栏，约 120 条/房间）；历史 < 30 条不值得回填，常规整理够用
+        // 历史 < 30 条不值得回填，常规整理够用（此时 batches=0 且不打标，等历史攒够）
         const boot = await bootstrapPlatesFromHistory(charId, charName, userName, llmConfig, {
             maxBatches: 10, minLines: 30,
+            startBatch: getBootstrapResume(charId),
+            onProgress: (done, total) => onProgress?.(`正在回填历史门牌（第 ${done}/${total} 批）…`),
         });
-        if (boot.batches > 0) {
+        if (boot.complete) {
             markPlateBootstrapDone(charId);
-            console.log(`🚪 [Digest] 老用户门牌自动回填：${boot.batches} 批 / ${boot.totalLines} 条历史`);
+            clearBootstrapResume(charId);
+            console.log(`🚪 [Digest] 门牌历史回填已还清（共 ${boot.neededBatches} 批）`);
+        } else if (boot.batches > 0) {
+            setBootstrapResume(charId, boot.nextBatch);
+            console.log(`🚪 [Digest] 门牌回填进度 ${boot.nextBatch}/${boot.neededBatches}，下次消化续传`);
         }
         return boot.updated;
     } catch (e: any) {
@@ -854,6 +870,8 @@ export async function runCognitiveDigestion(
     manualTrigger: boolean = false,
     userName?: string,
     embeddingConfig?: EmbeddingConfig,
+    /** 阶段回调：LLM 调用链较长（审视→回填→整理），让前端能实时告诉用户别走开 */
+    onProgress?: (stage: string) => void,
 ): Promise<DigestResult | null> {
     const trigger: 'auto' | 'manual' = manualTrigger ? 'manual' : 'auto';
     // 收集材料
@@ -869,14 +887,16 @@ export async function runCognitiveDigestion(
         if (embeddingConfig) await vectorizeOrphanedNodes(charId, embeddingConfig);
         const emptyResult: DigestResult = { resolved: [], deepened: [], faded: [], fulfilled: [], disappointed: [], internalized: [], synthesizedUser: [], selfInsights: [], selfConfused: [], worries: [], aspirations: [], distilled: [] };
         // 门牌整理不受消化门槛限制：卧室节点从不进消化材料池，但「我们之间」需要它们
-        let plateUpdated: PlateRoom[] = await maybeBootstrapPlates(charId, charName, userName, llmConfig);
+        let plateUpdated: PlateRoom[] = await maybeBootstrapPlates(charId, charName, userName, llmConfig, onProgress);
         try {
+            onProgress?.('正在整理门牌…');
             const { consolidateAllPlates } = await import('./roomPlates');
             const consolidated = (await consolidateAllPlates(charId, charName, userName, llmConfig, undefined, getLastDigestTs(charId))).updated;
             for (const r of consolidated) if (!plateUpdated.includes(r)) plateUpdated.push(r);
         } catch (e: any) {
             console.warn(`🚪 [Digest] 门牌整理失败（不影响消化结果）: ${e?.message || e}`);
         }
+        emptyResult.plateUpdated = plateUpdated;
         await saveDigestReport(charId, trigger, userName, null, emptyResult, {}, plateUpdated);
         markDigested(charId);
         return emptyResult;
@@ -885,6 +905,7 @@ export async function runCognitiveDigestion(
     console.log(`🧠 [Digest] Starting cognitive digestion for ${charName}: ${material.atticNodes.length} attic, ${material.anticipations.length} anticipations, ${material.studyNodes.length} study, ${material.userRoomNodes.length} user, ${material.selfRoomNodes.length} self, ${material.recentEpisodes.length} episodes(回看)`);
 
     // LLM 统一消化
+    onProgress?.('正在审视记忆…');
     const actions = await callDigestLLM(charName, charPersona, material, llmConfig, userName);
 
     // 执行动作：状态机改现有节点；概括类产出汇集为门牌蒸馏候选
@@ -894,10 +915,11 @@ export async function runCognitiveDigestion(
     if (embeddingConfig) await vectorizeOrphanedNodes(charId, embeddingConfig);
 
     // 门牌全量整理：消化是"独处反思"，正是把情景沉淀为语义的时机。
-    // 老用户首次：先自动回填历史（门牌全空+历史可观时），再做常规整理。
+    // 老用户：历史欠账没还清时先续传回填，再做常规整理。
     // 本次消化提炼的概括（plateSubmissions）作为高优先级原料一并送入。
-    let plateUpdated: PlateRoom[] = await maybeBootstrapPlates(charId, charName, userName, llmConfig);
+    let plateUpdated: PlateRoom[] = await maybeBootstrapPlates(charId, charName, userName, llmConfig, onProgress);
     try {
+        onProgress?.('正在整理门牌…');
         const { consolidateAllPlates } = await import('./roomPlates');
         // sinceTs = 上次消化时间：门牌原料以"这段时间的新增"优先，老节点只留少量高分锚点
         const consolidated = (await consolidateAllPlates(charId, charName, userName, llmConfig, plateSubmissions, getLastDigestTs(charId))).updated;
@@ -908,6 +930,7 @@ export async function runCognitiveDigestion(
     } catch (e: any) {
         console.warn(`🚪 [Digest] 门牌整理失败（不影响消化结果）: ${e?.message || e}`);
     }
+    result.plateUpdated = plateUpdated;
 
     // 消化日志：这次到底消化了什么，可在记忆宫殿 App 回看
     await saveDigestReport(charId, trigger, userName, material, result, plateSubmissions, plateUpdated);
