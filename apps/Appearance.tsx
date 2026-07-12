@@ -122,13 +122,13 @@ const INPUT_STYLES: { value: 'default' | 'rounded' | 'flat'; label: string }[] =
 ];
 const TIMESTAMP_OPTIONS: { value: 'always' | 'hover' | 'never'; label: string }[] = [
     { value: 'always', label: '始终显示' },
-    { value: 'hover', label: '悬停显示' },
+    { value: 'hover', label: '悬停（电脑）' },
     { value: 'never', label: '不显示' },
 ];
 
 // Chat Layout Presets (built-in combinations)
 const CHAT_LAYOUT_COMBOS: { name: string; desc: string; config: Partial<OSTheme> }[] = [
-    { name: '默认', desc: '标准聊天界面', config: { chatAvatarShape: 'circle', chatAvatarSize: 'medium', chatBubbleStyle: 'modern', chatMessageSpacing: 'default', chatHeaderStyle: 'default', chatInputStyle: 'default', chatShowTimestamp: 'hover' } },
+    { name: '默认', desc: '标准聊天界面', config: { chatAvatarShape: 'circle', chatAvatarSize: 'medium', chatBubbleStyle: 'modern', chatMessageSpacing: 'default', chatHeaderStyle: 'default', chatInputStyle: 'default', chatShowTimestamp: 'always' } },
     { name: 'QQ风格', desc: '圆角头像+紧凑间距', config: { chatAvatarShape: 'rounded', chatAvatarSize: 'medium', chatBubbleStyle: 'shadow', chatMessageSpacing: 'compact', chatHeaderStyle: 'gradient', chatInputStyle: 'rounded', chatShowTimestamp: 'hover' } },
     { name: '微信风格', desc: '方形头像+扁平气泡', config: { chatAvatarShape: 'square', chatAvatarSize: 'medium', chatBubbleStyle: 'flat', chatMessageSpacing: 'default', chatHeaderStyle: 'default', chatInputStyle: 'flat', chatShowTimestamp: 'hover' } },
     { name: 'iMessage', desc: '大圆头像+宽松气泡', config: { chatAvatarShape: 'circle', chatAvatarSize: 'large', chatBubbleStyle: 'modern', chatMessageSpacing: 'spacious', chatHeaderStyle: 'minimal', chatInputStyle: 'rounded', chatShowTimestamp: 'always' } },
@@ -227,7 +227,7 @@ const ChatAppearanceEditor: React.FC<{ theme: OSTheme; updateTheme: (u: Partial<
     const msgSpacing = theme.chatMessageSpacing || 'default';
     const headerStyle = theme.chatHeaderStyle || 'default';
     const inputStyle = theme.chatInputStyle || 'default';
-    const showTimestamp = theme.chatShowTimestamp || 'hover';
+    const showTimestamp = theme.chatShowTimestamp || 'always';
 
     const OptionButton: React.FC<{ active: boolean; label: string; desc?: string; onClick: () => void }> = ({ active, label, desc, onClick }) => (
         <button onClick={onClick}
