@@ -48,7 +48,7 @@ const presets: Array<{ name: string; desc: string; config: Partial<OSTheme> }> =
             chatMessageSpacing: 'default',
             chatInputStyle: 'wechat',
             chatSendButtonStyle: 'pill',
-            chatShowTimestamp: 'hover',
+            chatShowTimestamp: 'always',
         },
     },
     {
