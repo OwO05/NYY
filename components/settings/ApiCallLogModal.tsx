@@ -28,6 +28,7 @@ function formatTime(ts: number): { day: string; time: string } {
 const ApiCallLogModal: React.FC<ApiCallLogModalProps> = ({ isOpen, onClose }) => {
     const [entries, setEntries] = useState<ApiCallLogEntry[]>([]);
     const [loading, setLoading] = useState(false);
+    const [showHelp, setShowHelp] = useState(false);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -76,9 +77,41 @@ const ApiCallLogModal: React.FC<ApiCallLogModalProps> = ({ isOpen, onClose }) =>
                 </div>
             }
         >
-            <p className="text-[11px] text-slate-400 mb-3 leading-relaxed px-1">
-                只保留最近 <span className="font-semibold text-slate-500">5 天</span>的调用，超期自动丢弃。记录在你本地浏览器，不上传。
-            </p>
+            <div className="flex items-start justify-between gap-2 mb-3 px-1">
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                    只保留最近 <span className="font-semibold text-slate-500">5 天</span>的调用，超期自动丢弃。记录在你本地浏览器，不上传。
+                </p>
+                <button
+                    onClick={() => setShowHelp(v => !v)}
+                    className={`shrink-0 w-5 h-5 rounded-full text-[11px] font-bold leading-none flex items-center justify-center transition-colors ${
+                        showHelp ? 'bg-primary text-white' : 'bg-slate-200 text-slate-500'
+                    }`}
+                    aria-label="字段说明"
+                >
+                    ?
+                </button>
+            </div>
+
+            {showHelp && (
+                <div className="mb-3 rounded-2xl bg-amber-50/70 border border-amber-200/60 px-4 py-3 text-[11px] text-slate-600 leading-relaxed space-y-2">
+                    <p className="font-bold text-amber-700">关于「实际后端」——仅供参考，不是测谎仪</p>
+                    <p>
+                        「实际后端」是这次请求<span className="font-semibold">响应里自报的模型身份</span>（response.model 字段，以前要开 F12 才能看到）。
+                        和你请求的模型名对不上（剥掉 [渠道] 前缀后核心名不同）时会琥珀色 ⚠️ 标出；中转正常剥前缀不算异常，灰色显示。
+                    </p>
+                    <p>
+                        <span className="font-semibold text-amber-700">⚠️ 重要：这个名字是中转/上游自己填的一个字符串。</span>
+                        它可能是真的（自动降级/换渠道时上游懒得掩饰，老实透传真名——这是它最有用的场景）；
+                        也可能<span className="font-semibold">冤枉好人</span>（站子渠道映射随手填、透传了内部代号，模型本身没换）；
+                        也可能<span className="font-semibold">放过坏人</span>（响应模型名可以被改写，铁了心伪装的站子这一行看不出问题）。
+                    </p>
+                    <p>
+                        看到 ⚠️ 先别急着定罪：结合同一条记录里的 <span className="font-semibold">token 计数是否合理</span>（比如发了 4 万 token 却只报 1.5 万）、
+                        思考模型的 reasoning 是否莫名归零、耗时/速度是否突变、角色有没有突然降智掉格式，<span className="font-semibold">多个信号同时异常</span>再去问站子。
+                        单独一个名字对不上，可能只是标签没写整齐。
+                    </p>
+                </div>
+            )}
 
             {entries.length > 0 && (() => {
                 const totalTok = entries.reduce((s, e) => s + (e.totalTokens ?? 0), 0);
