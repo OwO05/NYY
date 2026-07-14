@@ -127,9 +127,12 @@ describe('v2 真实链路：分片 → 组装 → importFullData', () => {
             chatFineTune: { enabled: true, chatBubbleFontSize: 15, chatAvatarVisibility: 'hide_ai' },
         };
         const theme = { chatAvatarVisibility: 'hide_both', chatSnapToEdge: true, chatBubbleLineHeight: 1.5, chatEmojiSize: 'large' };
+        // 分角色聊天头像（URL 形态）随 user_profile 单例走；data: 形态在 full/media 模式
+        // 走 assets 抽取回填（restoreAssetsInPlace），text_only 剥掉——与整体头像同规则。
+        const userProfile = { name: 'me', avatar: 'https://img.example/me.png', bio: '', perCharAvatars: { ft1: 'https://img.example/me-ft1.png' } };
 
         const zip = new FakeZip();
-        const manifest = await writeV2Backup(zip, { characters: [char], theme } as any, {});
+        const manifest = await writeV2Backup(zip, { characters: [char], theme, userProfile } as any, {});
         const data: any = await assembleV2Backup(zip, manifest);
 
         // theme 是非数组字段 → 原样拼回（导入端 OSContext 直接拿它 updateTheme）
@@ -138,6 +141,8 @@ describe('v2 真实链路：分片 → 组装 → importFullData', () => {
         await DB.importFullData(data);
         const restored = (await DB.getRawStoreData('characters')).find((c: any) => c.id === 'ft1');
         expect(restored.chatFineTune).toEqual(char.chatFineTune);
+        const profile = (await DB.getRawStoreData('user_profile'))[0];
+        expect(profile.perCharAvatars).toEqual(userProfile.perCharAvatars);
     });
 
     it('formatVersion 3 在组装阶段 abort，DB 未发生任何写（test 12）', async () => {

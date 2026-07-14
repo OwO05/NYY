@@ -144,7 +144,7 @@ const PerCharAvatarPicker: React.FC = () => {
                             return (
                                 <button key={c.id} onClick={() => openEditor(c.id)} className="flex flex-col items-center gap-1.5 group active:scale-95 transition-transform">
                                     <div className="relative">
-                                        <img src={c.avatar} alt="" className="w-14 h-14 rounded-2xl object-cover bg-slate-100 border border-slate-100 group-hover:border-primary/30 transition-colors" />
+                                        <img src={c.avatar} alt="" className="w-14 h-14 rounded-full object-cover bg-slate-100 border border-slate-100 group-hover:border-primary/30 transition-colors" />
                                         {/* 右下小圆 = 这个聊天里「你」的头像；设置过 → 主题色描边，否则灰显整体头像 */}
                                         <img
                                             src={override || userProfile.avatar}
@@ -156,6 +156,13 @@ const PerCharAvatarPicker: React.FC = () => {
                                 </button>
                             );
                         })}
+                        {/* 末页不满 8 人时用隐形占位补齐两行高度，翻页时容器不弹跳 */}
+                        {pageCount > 1 && pageChars.length < PAGE_SIZE && Array.from({ length: PAGE_SIZE - pageChars.length }, (_, i) => (
+                            <div key={`pad-${i}`} className="flex flex-col items-center gap-1.5 invisible" aria-hidden="true">
+                                <div className="w-14 h-14 rounded-full" />
+                                <span className="text-[10px]">&nbsp;</span>
+                            </div>
+                        ))}
                     </div>
 
                     {pageCount > 1 && (
@@ -191,7 +198,7 @@ const PerCharAvatarPicker: React.FC = () => {
 
                         <div className="flex items-center justify-center gap-5 mb-4">
                             <div className="flex flex-col items-center gap-1">
-                                <img src={editingChar.avatar} className="w-16 h-16 rounded-2xl object-cover bg-slate-100" alt="" />
+                                <img src={editingChar.avatar} className="w-16 h-16 rounded-full object-cover bg-slate-100" alt="" />
                                 <span className="text-[10px] text-slate-400">{editingChar.name}</span>
                             </div>
                             <span className="text-slate-300 text-lg">×</span>
@@ -213,7 +220,7 @@ const PerCharAvatarPicker: React.FC = () => {
                                 <button onClick={applyUrl} className="shrink-0 rounded-xl bg-primary px-3 py-2 text-[11px] font-bold text-white active:scale-95 transition-transform">使用</button>
                             </div>
                             <p className="mt-1.5 text-[10px] leading-relaxed text-slate-400">
-                                推荐链接：不占本地空间，备份导出更小更快，换设备也不丢。
+                                推荐链接：不占本地空间，备份更小更快；「纯文字备份」也只有链接能把图带走（本地上传的图会被剥掉）。
                             </p>
                         </div>
 
