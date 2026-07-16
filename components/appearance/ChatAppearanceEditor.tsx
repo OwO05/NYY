@@ -3,6 +3,7 @@ import { AppID, OSTheme, ChatFineTuneFields } from '../../types';
 import WhiteboxSoundEditor from '../chat/WhiteboxSoundEditor';
 import { WhiteboxSound } from '../../utils/whiteboxSound';
 import ChatFineTunePanel from '../chat/ChatFineTunePanel';
+import { FadersHorizontal } from '@phosphor-icons/react';
 
 type Props = {
     theme: OSTheme;
@@ -359,10 +360,7 @@ const previewBubbleStyle = (bubble: string, isUser: boolean, theme: OSTheme): Re
         background: isUser ? primary : '#ffffff',
         color: isUser ? '#ffffff' : '#334155',
         borderRadius: bubble === 'ios' ? 24 : bubble === 'wechat' ? 18 : 20,
-        // 迷你预览统一 12px 小字 + 紧凑内边距：预览必须和设置区同屏可见，个头是第一约束。
-        // 用户在「细节微调」里设了字号时由 previewFineTextStyle 覆盖。
-        padding: '8px 12px',
-        fontSize: 12,
+        padding: '10px 14px',
         maxWidth: '72%',
     };
     if (bubble === 'outline') return { ...base, background: 'transparent', color: isUser ? primary : '#475569', border: `2px solid ${isUser ? primary : '#cbd5e1'}` };
@@ -410,10 +408,40 @@ export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme, onRe
     const pendingIndicator = theme.chatPendingIndicator !== false;
     const showHeaderBuffs = theme.chatHideHeaderBuffs !== true;
     const [showStyleHelp, setShowStyleHelp] = useState(false);
-    // 小屏兜底：预览再紧凑也可能挤占设置区，允许一键收成一条细栏。
-    const [isPreviewCollapsed, setIsPreviewCollapsed] = useState(false);
 
-    // 调试区左右翻页：预览常驻在上，下面一页一个主题，改哪项都能立刻在预览里看到。
+    // 聊天壳设置面板悬浮化——同私聊「聊天装扮」的形态：面板浮在预览上方而不占文档流，
+    // 预览不用瘦身也能和设置同屏；点圆气泡收起面板即可看全预览。
+    const [panelOpen, setPanelOpen] = useState(true);
+    // 圆气泡可自由拖动（按住拖走，松手留在原地）；null = 默认位置（右缘、35vh 高度处）。
+    const [bubblePos, setBubblePos] = useState<{ x: number; y: number } | null>(null);
+    const bubbleDrag = useRef<{ startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
+    const BUBBLE_SIZE = 48;
+    const clampBubble = (x: number, y: number) => ({
+        x: Math.max(8, Math.min(window.innerWidth - BUBBLE_SIZE - 8, x)),
+        y: Math.max(56, Math.min(window.innerHeight - BUBBLE_SIZE - 24, y)),
+    });
+    const onBubblePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        bubbleDrag.current = { startX: e.clientX, startY: e.clientY, originX: rect.left, originY: rect.top, moved: false };
+        e.currentTarget.setPointerCapture(e.pointerId);
+    };
+    const onBubblePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+        const drag = bubbleDrag.current;
+        if (!drag) return;
+        const dx = e.clientX - drag.startX;
+        const dy = e.clientY - drag.startY;
+        // 6px 内算点按不算拖动，避免手指微颤把点击吞掉
+        if (!drag.moved && Math.hypot(dx, dy) < 6) return;
+        drag.moved = true;
+        setBubblePos(clampBubble(drag.originX + dx, drag.originY + dy));
+    };
+    const onBubblePointerUp = () => {
+        const drag = bubbleDrag.current;
+        bubbleDrag.current = null;
+        if (drag && !drag.moved) setPanelOpen(v => !v);
+    };
+
+    // 悬浮面板内左右翻页：一页一个主题，改哪项都能立刻在后面的预览里看到。
     const PAGE_TITLES = ['快速预设', '聊天壳', '头部', '气泡与头像', '细节微调', '表情包与输入栏'];
     const [page, setPage] = useState(0);
     const swipeStartX = useRef<number | null>(null);
@@ -447,35 +475,21 @@ export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme, onRe
     const headerTextClass = headerStyle === 'discord' ? 'text-white' : headerStyle === 'pixel' ? 'text-[#fff7ed]' : 'text-slate-700';
     const previewGap = messageSpacing === 'compact' ? 'gap-1.5' : messageSpacing === 'spacious' ? 'gap-4' : 'gap-2.5';
     const previewPad = headerDensity === 'compact' ? 'px-4 py-3' : headerDensity === 'airy' ? 'px-5 py-[18px]' : 'px-4 py-3.5';
-    // 文案刻意精简：预览要和下方设置区同屏，每条消息控制在一行左右。
-    // 保留 2+2 的同角色连发结构，「头像出现频率」的连续共用效果才演示得出来。
     const previewMessages = [
-        { id: 'ai-1', role: 'assistant', text: '这套聊天壳像样多了。' },
-        { id: 'ai-2', role: 'assistant', text: '头像还能选共用或每条都显示。' },
-        { id: 'user-1', role: 'user', text: '对，头像频率也能 DIY。' },
-        { id: 'user-2', role: 'user', text: '不同软件的味道更明显了。' },
+        { id: 'ai-1', role: 'assistant', text: '今天这套聊天壳已经比之前像样多了。' },
+        { id: 'ai-2', role: 'assistant', text: '现在还能决定头像是连续共用，还是每条都显示。' },
+        { id: 'user-1', role: 'user', text: '对，我想把头像频率也做成可以 DIY 的。' },
+        { id: 'user-2', role: 'user', text: '这样不同软件的味道会更明显。' },
     ] as const;
 
     return (
         <div className="space-y-5">
-            {/* 实时预览：sticky 常驻顶部——往下翻到哪一页、改哪个选项，效果都始终看得见。
-                -top-5 抵消外层滚动容器的 p-5 内边距，贴住 tab 栏下沿。
-                预览刻意做迷你（短文案 + 12px 小字），保证手机上预览和设置区同屏；还嫌挤可以点标题收起。 */}
-            <div className="sticky -top-5 z-20 -mx-1 bg-slate-50 px-1 pb-1 pt-1">
+            {/* 实时预览：聊天壳设置在悬浮面板里（下方圆气泡），预览保持原尺寸、始终可见。 */}
             <section className="rounded-3xl border border-slate-100 bg-white p-3 shadow-sm">
-                <button
-                    type="button"
-                    onClick={() => setIsPreviewCollapsed(v => !v)}
-                    aria-expanded={!isPreviewCollapsed}
-                    className={`flex w-full items-baseline justify-between px-1 ${isPreviewCollapsed ? '' : 'mb-2'}`}
-                >
+                <div className="mb-2 flex items-baseline justify-between px-1">
                     <h2 className="text-[11px] font-bold uppercase tracking-widest text-slate-400">实时预览</h2>
-                    <span className="flex items-center gap-1 text-[9px] text-slate-300">
-                        {isPreviewCollapsed ? '点击展开' : '全局设置 · 改动立即反映'}
-                        <span className={`text-slate-400 transition-transform ${isPreviewCollapsed ? '' : 'rotate-180'}`} aria-hidden>⌄</span>
-                    </span>
-                </button>
-                {!isPreviewCollapsed && (
+                    <span className="text-[9px] text-slate-300">全局设置 · 改动立即反映</span>
+                </div>
                 <div className={`sully-chat-root overflow-hidden rounded-[28px] ${shellClass(chromeStyle)}`} style={backgroundStyleForPreview(backgroundStyle, chromeStyle)}>
                     {/* 实时套用「白框自定义」CSS：预览各零件挂了同样的 .sully-chat-* 钩子，故能即时反映。
                         注意：预览外壳 overflow-hidden 会裁掉溢出效果（如波浪下沿），真聊天里完整可见。 */}
@@ -522,7 +536,7 @@ export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme, onRe
                             </div>
                         )}
                     </div>
-                    <div className={`flex min-h-[110px] flex-col p-3 ${previewGap}`}>
+                    <div className={`flex min-h-[150px] flex-col p-3 ${previewGap}`}>
                         {previewMessages.map((message, index) => {
                             const isUser = message.role === 'user';
                             const nextRole = index < previewMessages.length - 1 ? previewMessages[index + 1].role : null;
@@ -554,12 +568,34 @@ export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme, onRe
                         </div>
                     </div>
                 </div>
-                )}
             </section>
+
+            {/* 聊天壳设置：同私聊「聊天装扮」的悬浮形态——面板 fixed 贴底、无遮罩，不占文档流，
+                预览保持完整尺寸也能边看边调。圆气泡点按 = 收起/展开面板，按住可拖到不挡手的位置。 */}
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 px-4 py-2.5 text-[10px] leading-relaxed text-slate-400">
+                聊天壳设置在悬浮小面板里 · 点右侧圆钮收起/展开，按住圆钮可拖到不挡预览的位置
             </div>
 
-            {/* 调试区：一页一个主题，左右滑动或点页签切换；预览常驻上方，改哪项都立刻看得到 */}
-            <section className={groupClass}>
+            <button
+                type="button"
+                onPointerDown={onBubblePointerDown}
+                onPointerMove={onBubblePointerMove}
+                onPointerUp={onBubblePointerUp}
+                onPointerCancel={() => { bubbleDrag.current = null; }}
+                className={`fixed z-[106] flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-colors active:scale-90 ${panelOpen ? 'bg-primary text-white ring-4 ring-primary/20' : 'bg-white/95 text-primary ring-1 ring-primary/30 backdrop-blur'}`}
+                style={bubblePos
+                    ? { left: bubblePos.x, top: bubblePos.y, touchAction: 'none' }
+                    : { right: 12, top: 'calc(var(--safe-top, 0px) + 35vh)', touchAction: 'none' }}
+                aria-label={panelOpen ? '收起聊天壳设置面板' : '展开聊天壳设置面板'}
+            >
+                <FadersHorizontal className="h-6 w-6" weight="bold" />
+            </button>
+
+            {panelOpen && (
+            <section
+                className="fixed left-1/2 z-[105] w-[94%] max-w-md -translate-x-1/2 overflow-y-auto rounded-3xl border border-white/60 bg-white/95 p-4 shadow-[0_12px_40px_rgba(15,23,42,0.22)] backdrop-blur-xl [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                style={{ bottom: 'calc(16px + var(--safe-bottom, 0px))', maxHeight: '46vh' }}
+            >
                 <div className="mb-4 flex items-center gap-1.5">
                     <button
                         onClick={() => goPage(page - 1)}
@@ -707,6 +743,7 @@ export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme, onRe
                 </>)}
                 </div>
             </section>
+            )}
 
             <section className={groupClass}>
                 <div className="mb-3">
